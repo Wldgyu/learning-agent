@@ -1,0 +1,33 @@
+# Local secrets and machine settings
+.env
+.env.*
+!.env.example
+.vscode/
+run.local.ps1
+
+# Personal study data and downloaded source material
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+source_cache/
+import_report.json
+review_queue.csv
+*기획안*.txt
+정처기_AI_학습_Agent_MVP_설계안.txt
+
+# Local data preparation tools
+import_questions.py
+cache_images.py
+
+# Python environments and generated files
+.runtime/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>스터디 에이전트</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-icon">✦</span><div><strong>STUDY AGENT</strong><small>정보처리기사 실기</small></div></div>
+      <nav id="nav">
+        <button data-view="dashboard" class="active"><span>◫</span> 대시보드</button>
+        <button data-view="today"><span>◉</span> 오늘의 학습</button>
+        <button data-view="bank"><span>▤</span> 문제은행</button>
+        <button data-view="generated"><span>✦</span> AI 생성 문제</button>
+        <button data-view="exams"><span>▣</span> 회차별 시험</button>
+        <button data-view="wrong"><span>↺</span> 오답노트</button>
+        <button data-view="theory"><span>◇</span> 이론 노트</button>
+      </nav>
+      <div class="sidebar-bottom"><div class="status-dot" id="ai-dot"></div><span id="ai-status">AI 상태 확인 중</span></div>
+    </aside>
+    <main>
+      <header class="topbar"><div><span class="eyebrow">PERSONAL LEARNING SPACE</span><h1 id="page-title">대시보드</h1></div><span id="today-date"></span></header>
+      <div id="notice" role="status"></div>
+      <section id="view"></section>
+    </main>
+  </div>
+  <div id="modal" class="modal hidden" aria-hidden="true"><div class="modal-backdrop" data-close></div><div class="modal-card" role="dialog" aria-modal="true"><button class="close" data-close aria-label="닫기">×</button><div id="modal-body"></div></div></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
