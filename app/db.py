@@ -41,6 +41,10 @@ def initialize():
           UNIQUE (year, round, number),
           FOREIGN KEY (year, round) REFERENCES source_page(year, round)
         );
+        CREATE TABLE IF NOT EXISTS question_context (
+          question_id INTEGER PRIMARY KEY REFERENCES question(id),
+          fingerprint TEXT NOT NULL, transcription TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS question_meta (
           question_id INTEGER PRIMARY KEY REFERENCES question(id),
           category TEXT NOT NULL, subcategory TEXT NOT NULL,

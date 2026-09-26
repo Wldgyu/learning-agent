@@ -8,6 +8,7 @@ let currentAttempt = null;
 let aiEnabled = false;
 let examState = null;
 let examTimer = null;
+let todayPlan = null;
 const labels = {review:'복습',weak:'취약 분야',new:'새 문제',generated:'AI 문제',practice:'다시 연습'};
 
 function esc(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -49,10 +50,33 @@ async function dashboard() {
 }
 async function today() {
   const plan=await api('/api/study/today');
+  if(currentView!=='today') return;
+  todayPlan=plan;
+  renderToday();
+}
+function renderToday() {
+  const plan=todayPlan;
   const counts={};plan.items.forEach(q=>counts[q.category]=(counts[q.category]||0)+1);
   const done=plan.items.filter(q=>q.completed).length;
-  view.innerHTML=`<div class="section-head"><div><h2>맞춤 학습 계획</h2><p>현재 권장 난이도 Lv.${plan.difficulty} · ${done}/20 완료 · 분야별로 배분한 20문제입니다.</p></div></div><div class="category-summary">${Object.entries(counts).map(([category,count])=>`<span class="pill gray">${esc(category)} ${count}</span>`).join('')}</div>
+  view.innerHTML=`<div class="section-head daily-heading"><div><h2>맞춤 학습 계획</h2><p>현재 권장 난이도 Lv.${plan.difficulty} · ${done}/${plan.items.length} 완료 · 분야별로 배분한 문제입니다.</p><p>새 문제로 바꿔도 기존 풀이 기록과 오답노트는 유지됩니다.</p></div><button id="refresh-today" class="button ghost">↻ 다른 20문제 받기</button></div><div class="category-summary">${Object.entries(counts).map(([category,count])=>`<span class="pill gray">${esc(category)} ${count}</span>`).join('')}</div>
   <div class="list">${plan.items.length ? plan.items.map(q=>rowHtml(q,q.reason==='generated')).join('') : '<div class="empty">학습 문제가 없습니다.</div>'}</div>`;
+  $('#refresh-today').onclick=()=>refreshToday().catch(fail);
+}
+async function refreshToday() {
+  const button=$('#refresh-today');
+  if(button.disabled) return;
+  button.disabled=true;
+  button.textContent='문제를 바꾸고 있습니다…';
+  try {
+    const plan=await api('/api/study/today/refresh',{method:'POST'});
+    if(currentView!=='today') return;
+    todayPlan=plan;
+    renderToday();
+    notice(`${plan.items.length}문제로 오늘의 학습을 새로 준비했습니다.`);
+  } finally {
+    button.disabled=false;
+    button.textContent='↻ 다른 20문제 받기';
+  }
 }
 async function bank() {
   view.innerHTML=`<div class="toolbar"><input id="search" placeholder="문제 내용 검색"><select id="year"><option value="">전체 연도</option>${[2026,2025,2024,2023,2022,2021,2020].map(y=>`<option>${y}</option>`).join('')}</select><select id="round"><option value="">전체 회차</option><option>1</option><option>2</option><option>3</option><option>4</option></select><select id="category"><option value="">전체 분야</option>${['프로그래밍','데이터베이스','보안','네트워크','소프트웨어 공학','기타'].map(x=>`<option>${x}</option>`).join('')}</select><button id="search-btn" class="button ghost">검색</button><button id="expected-btn" class="button">AI 예상문제</button><div id="expected-status"></div></div><div id="bank-results"></div><div id="pages" class="page-controls"></div>`;
@@ -151,16 +175,36 @@ async function explainTheory(button) {
 async function openQuestion(kind,id) {
   const generated=kind==='g';
   const q=await api(generated?`/api/generated/${id}`:`/api/questions/${id}`);
-  currentQuestion={...q,generated}; currentAttempt=null;
+  const dailyIndex=currentView==='today'&&todayPlan ? todayPlan.items.findIndex(item=>item.id===q.id&&(item.reason==='generated')===generated) : -1;
+  currentQuestion={...q,generated,dailyIndex}; currentAttempt=null;
   const images=generated?[]:(q.local_images||[]);
-  $('#modal-body').innerHTML=`<span class="pill">${esc(q.category)} / ${esc(q.subcategory)}</span><h2 class="question-title">${generated?'AI 생성 문제':`${q.year}년 ${q.round}회 ${q.number}번`}</h2>
+  $('#modal-body').innerHTML=`${dailyIndex>=0?`<div class="note daily-position">오늘의 학습 ${dailyIndex+1} / ${todayPlan.items.length}</div>`:''}<span class="pill">${esc(q.category)} / ${esc(q.subcategory)}</span><h2 class="question-title">${generated?'AI 생성 문제':`${q.year}년 ${q.round}회 ${q.number}번`}</h2>
     <div class="question-text">${esc(q.question_text)}</div>${images.map(url=>`<img class="question-image" src="${esc(url)}" alt="문제 첨부 이미지" loading="lazy">`).join('')}
     <div class="question-form"><textarea id="answer-input" placeholder="답을 입력하세요"></textarea><div class="actions"><button id="submit-answer" class="button">답안 제출</button><button id="close-question" class="button muted">나중에 풀기</button></div></div><div id="answer-result"></div>`;
   $('#modal').classList.remove('hidden'); $('#modal').setAttribute('aria-hidden','false');
   $('#submit-answer').onclick=()=>submitAnswer().catch(fail);
   $('#close-question').onclick=closeModal;
+  $('.modal-card').scrollTop=0;
 }
 function closeModal(){ $('#modal').classList.add('hidden'); $('#modal').setAttribute('aria-hidden','true');currentQuestion=null; }
+function completeDailyQuestion() {
+  if(!currentQuestion||currentQuestion.dailyIndex<0||!todayPlan) return;
+  const index=currentQuestion.dailyIndex;
+  todayPlan.items[index].completed=true;
+  if(currentView==='today') renderToday();
+  if($('#next-daily')) return;
+  const last=index===todayPlan.items.length-1;
+  $('#post-actions').insertAdjacentHTML('beforeend',`<button id="next-daily" class="button">${last?'오늘의 학습 목록으로':'다음 문제 →'}</button>`);
+  $('#next-daily').onclick=async()=>{
+    const button=$('#next-daily');
+    button.disabled=true;
+    try {
+      if(last){closeModal();return}
+      const next=todayPlan.items[index+1];
+      await openQuestion(next.reason==='generated'?'g':'q',next.id);
+    } catch(error){button.disabled=false;fail(error)}
+  };
+}
 async function submitAnswer() {
   const input=$('#answer-input'); const answer=input.value.trim(); if(!answer){notice('답을 입력하세요.');return}
   $('#submit-answer').disabled=true;
@@ -174,6 +218,7 @@ async function submitAnswer() {
     if($('#analyze')) $('#analyze').onclick=()=>analyze().catch(fail);
     $('#theory-link').onclick=()=>{closeModal();setView('theory')};
     $('#similar').onclick=()=>similar().catch(fail);
+    if(auto) completeDailyQuestion();
   } catch(error){$('#submit-answer').disabled=false;throw error}
 }
 async function selfReview(correct) {
@@ -181,18 +226,23 @@ async function selfReview(correct) {
   document.querySelectorAll('[data-self]').forEach(b=>b.remove());
   $('#post-actions').insertAdjacentHTML('afterbegin',correct?'<span class="pill green">정답 기록 완료</span>':'<span class="pill red">오답 기록 완료</span><button class="button ghost sm" id="analyze">AI 오답 분석</button>');
   if($('#analyze')) $('#analyze').onclick=()=>analyze().catch(fail);
+  completeDailyQuestion();
   notice(`다음 복습: ${data.next_review_at.slice(0,10)}`);
 }
 async function analyze() {
   if(!aiEnabled){notice('.env에 API 키를 입력하세요.');return}
-  $('#ai-feedback').innerHTML='<div class="result">오답 원인을 분석하고 있습니다…</div>';
+  const question=currentQuestion;
+  $('#ai-feedback').innerHTML=aiProgress('오답을 분석하고 풀이의 정확성을 검수하고 있습니다…');
   try {
     const result=await api(`/api/attempts/${currentAttempt}/analyze`,{method:'POST'});
-    $('#ai-feedback').innerHTML=`<div class="result"><strong>AI 오답 분석</strong><div>${esc(result.feedback||'')}</div><div class="note">원인: ${esc(result.cause||'')} · 취약 개념: ${esc((result.weak_concepts||[]).join(', '))}</div></div>`;
-  } catch(error) {$('#ai-feedback').innerHTML=`<div class="result">${esc(error.message)} <button class="button ghost sm" id="retry-analyze">다시 시도</button></div>`;$('#retry-analyze').onclick=()=>analyze().catch(fail)}
+    if(currentQuestion!==question) return;
+    const steps=Array.isArray(result.steps)?result.steps.map(step=>String(step).replace(/^\s*\d+[.)]\s*/,'')):[];
+    $('#ai-feedback').innerHTML=`<div class="result ai-analysis"><strong>AI 오답 분석</strong><p>${esc(result.feedback||'')}</p>${steps.length?`<strong>차근차근 풀이</strong><ol>${steps.map(step=>`<li>${esc(step)}</li>`).join('')}</ol>`:''}<strong>내 답과 비교</strong><p>${esc(result.cause||'')}</p>${result.next_tip?`<strong>다음에는 이렇게 확인하세요</strong><p>${esc(result.next_tip)}</p>`:''}${result.weak_concepts?.length?`<div class="note">복습할 개념: ${esc(result.weak_concepts.join(', '))}</div>`:''}</div>`;
+  } catch(error) {if(currentQuestion!==question)return;$('#ai-feedback').innerHTML=`<div class="result">${esc(error.message)} <button class="button ghost sm" id="retry-analyze">다시 시도</button></div>`;$('#retry-analyze').onclick=()=>analyze().catch(fail)}
 }
 async function similar() {
   if(!aiEnabled){notice('.env에 API 키를 입력하세요.');return}
+  const question=currentQuestion;
   const button=$('#similar');
   if(button.disabled) return;
   button.disabled=true;
@@ -201,9 +251,10 @@ async function similar() {
   $('#ai-feedback').innerHTML=aiProgress('새 문제를 만들고 검증하고 있습니다…');
   try {
     const result=await api('/api/generated',{method:'POST',body:JSON.stringify(payload)});
+    if(currentQuestion!==question) return;
     if(!result.valid){$('#ai-feedback').innerHTML=`<div class="result">검증을 통과하지 못했습니다. ${esc((result.issues||[]).join(', '))}</div>`;return}
     await openQuestion('g',result.id);
-  } catch(error) {$('#ai-feedback').innerHTML=`<div class="result">${esc(error.message)} <button class="button ghost sm" id="retry-similar">다시 시도</button></div>`;$('#retry-similar').onclick=()=>similar().catch(fail)}
+  } catch(error) {if(currentQuestion!==question)return;$('#ai-feedback').innerHTML=`<div class="result">${esc(error.message)} <button class="button ghost sm" id="retry-similar">다시 시도</button></div>`;$('#retry-similar').onclick=()=>similar().catch(fail)}
   finally {button.disabled=false}
 }
 async function generateExpected() {

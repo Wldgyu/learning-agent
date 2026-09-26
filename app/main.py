@@ -12,6 +12,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from . import llm_service
 from .db import connect, initialize
 from .services import build_plan, complete_attempt, grade, now, suggested_difficulty
+from .text_format import format_answer
+from .question_context import verified_image_text
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -206,7 +208,7 @@ def get_exam(year: int, round_number: int):
 @app.post("/api/exams/{year}/{round_number}/submit")
 def submit_exam(year: int, round_number: int, payload: ExamSubmission):
     with connect() as db:
-        rows = db.execute("SELECT id,number,answer FROM question WHERE year=? AND round=? ORDER BY number",
+        rows = db.execute("SELECT id,number,answer,answer_html FROM question WHERE year=? AND round=? ORDER BY number",
                           (year, round_number)).fetchall()
         answer_map = {answer.question_id: answer.user_answer.strip() for answer in payload.answers}
         if len(rows) != 20 or len(answer_map) != 20 or set(answer_map) != {row["id"] for row in rows}:
@@ -222,7 +224,7 @@ def submit_exam(year: int, round_number: int, payload: ExamSubmission):
             if is_correct is not None:
                 complete_attempt(db, cursor.lastrowid, is_correct)
             results.append({"number": row["number"], "question_id": row["id"], "attempt_id": cursor.lastrowid,
-                            "user_answer": user_answer, "correct_answer": row["answer"],
+                            "user_answer": user_answer, "correct_answer": format_answer(row["answer_html"], row["answer"]),
                             "is_correct": is_correct, "grading_method": method})
         return {"year": year, "round": round_number, "results": results,
                 "correct": sum(result["is_correct"] is True for result in results),
@@ -251,7 +253,8 @@ def submit_answer(payload: AnswerIn):
         result = None
         if auto_result is not None:
             result = complete_attempt(db, cursor.lastrowid, auto_result)
-        return {"attempt_id": cursor.lastrowid, "correct_answer": correct_answer,
+        display_answer = format_answer(question["answer_html"], correct_answer) if payload.question_id else correct_answer
+        return {"attempt_id": cursor.lastrowid, "correct_answer": display_answer,
                 "grading_method": method, "result": result,
                 "explanation": question["explanation"] if payload.generated_question_id else None}
 
@@ -277,17 +280,25 @@ def analyze_attempt(attempt_id: int):
             question = db.execute("SELECT * FROM generated_question WHERE id=?", (attempt["generated_question_id"],)).fetchone()
         if not llm_service.available():
             raise HTTPException(503, ".env에 API 키를 입력하세요.")
+        image_context = verified_image_text(db, question) if attempt["question_id"] else ""
+        missing_images = bool(attempt["question_id"] and json.loads(question["image_urls"]) and not image_context)
         try:
             analysis = llm_service.analyze_wrong(question["question_text"], attempt["correct_answer"],
-                                                  attempt["user_answer"], question["category"], question["subcategory"])
+                                                  attempt["user_answer"], question["category"], question["subcategory"],
+                                                  image_context=image_context, missing_image_context=missing_images)
         except RuntimeError as exc:
             raise ai_http_error(exc) from exc
         if not isinstance(analysis, dict):
             raise HTTPException(502, "AI 분석 응답 형식이 올바르지 않습니다.")
         concepts = analysis.get("weak_concepts")
+        steps = analysis.get("steps")
         analysis = {"cause": ai_text(analysis.get("cause")),
                     "feedback": ai_text(analysis.get("feedback")),
+                    "steps": [ai_text(item) for item in steps] if isinstance(steps, list) else [],
+                    "next_tip": ai_text(analysis.get("next_tip")),
                     "weak_concepts": [ai_text(item) for item in concepts] if isinstance(concepts, list) else []}
+        if missing_images:
+            return analysis
         id_column = "question_id" if attempt["question_id"] else "generated_question_id"
         db.execute(f"""UPDATE wrong_answer SET wrong_reason=?,weak_concept=? WHERE user_id=1 AND {id_column}=?""",
                    (analysis["cause"], json.dumps(analysis["weak_concepts"], ensure_ascii=False),
@@ -354,6 +365,13 @@ def generate(payload: GenerateIn):
 def today():
     with connect() as db:
         return {"items": build_plan(db), "difficulty": suggested_difficulty(db)}
+
+
+@app.post("/api/study/today/refresh")
+def refresh_today():
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        return {"items": build_plan(db, refresh=True), "difficulty": suggested_difficulty(db)}
 
 
 @app.get("/api/wrong-answers")

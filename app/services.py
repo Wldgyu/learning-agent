@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import re
 import sqlite3
 from collections import Counter
@@ -100,10 +101,16 @@ def complete_attempt(db: sqlite3.Connection, attempt_id: int, correct: bool):
             "suggested_difficulty": suggested_difficulty(db, attempt["user_id"])}
 
 
-def build_plan(db: sqlite3.Connection, user_id: int = 1):
+def build_plan(db: sqlite3.Connection, user_id: int = 1, refresh: bool = False):
     day = now().date().isoformat()
     saved = db.execute("SELECT * FROM daily_plan WHERE user_id=? AND plan_date=? ORDER BY position",
                        (user_id, day)).fetchall()
+    previous = set()
+    if refresh:
+        previous = {(row["question_id"] is None, row["generated_question_id"]
+                     if row["question_id"] is None else row["question_id"]) for row in saved}
+        db.execute("DELETE FROM daily_plan WHERE user_id=? AND plan_date=?", (user_id, day))
+        saved = []
     if not saved:
         # A stable daily set: 20 questions distributed across the six current study areas.
         quotas = {"프로그래밍": 6, "데이터베이스": 4, "소프트웨어 공학": 3,
@@ -139,6 +146,12 @@ def build_plan(db: sqlite3.Connection, user_id: int = 1):
                                "subcategory": row["subcategory"], "reason": "generated",
                                "priority": 1, "skill_score": 0.5, "year": 0, "round": 0,
                                "number": 0, "generated": True})
+        if refresh:
+            fresh = [item for item in candidates if (item["generated"], item["id"]) not in previous]
+            # Reuse old items only when the entire pool cannot supply 20 different questions.
+            candidates = fresh if len(fresh) >= 20 else fresh + [
+                item for item in candidates if (item["generated"], item["id"]) in previous]
+        random_order = {(item["generated"], item["id"]): random.random() for item in candidates}
         picked = []
         chosen = set()
         selected_years = Counter()
@@ -151,9 +164,11 @@ def build_plan(db: sqlite3.Connection, user_id: int = 1):
                            and (subcategory is None or candidate["subcategory"] == subcategory)]
                 if not options:
                     break
-                candidate = min(options, key=lambda item: (item["priority"], selected_years[item["year"]],
-                                                           item["skill_score"], -item["year"],
-                                                           -item["round"], item["number"]))
+                candidate = min(options, key=lambda item: (
+                    (item["generated"], item["id"]) in previous,
+                    item["priority"], selected_years[item["year"]], item["skill_score"],
+                    random_order[(item["generated"], item["id"])] if refresh else -item["year"],
+                    -item["round"], item["number"]))
                 key = (candidate["generated"], candidate["id"])
                 picked.append(candidate)
                 chosen.add(key)

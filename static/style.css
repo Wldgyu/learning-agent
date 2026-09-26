@@ -6,6 +6,7 @@
 .row{min-width:0}
 .row-meta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .category-summary{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:18px}
+.daily-heading{gap:12px;flex-wrap:wrap}.daily-position{margin-bottom:10px}
 .theory-card p,.theory-card .note{white-space:pre-line}
 .ai-progress{display:inline-flex;align-items:center;gap:7px;color:#63718c;font-size:12px;line-height:1.5}
 .ai-spinner{width:13px;height:13px;border:2px solid #cbd3f4;border-top-color:#576ce5;border-radius:50%;animation:ai-spin .8s linear infinite;flex-shrink:0}
@@ -13,6 +14,8 @@
 #expected-status{display:flex;align-items:center;min-height:38px}
 .theory-ai-output{margin-top:10px}
 .ai-theory-result{padding:14px;background:#f6f8ff;border-radius:10px;line-height:1.6}
+.ai-analysis p,.ai-analysis li{white-space:pre-wrap;overflow-wrap:anywhere}
+.ai-analysis p{margin:0 0 14px}.ai-analysis ol{padding-left:24px;margin:0 0 18px}.ai-analysis li{padding-left:4px;margin-bottom:12px}
 .ai-theory-result strong{display:block;margin-bottom:6px}
 .ai-theory-result p{margin:0 0 8px}
 .ai-theory-result small{display:block;margin-top:9px;color:#8290a5}
