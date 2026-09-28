@@ -282,8 +282,12 @@ def analyze_attempt(attempt_id: int):
             raise HTTPException(503, ".env에 API 키를 입력하세요.")
         image_context = verified_image_text(db, question) if attempt["question_id"] else ""
         missing_images = bool(attempt["question_id"] and json.loads(question["image_urls"]) and not image_context)
+        analysis_answer = attempt["correct_answer"]
+        if attempt["question_id"] and analysis_answer == question["answer"]:
+            # Preserve answer numbering/line breaks when multiple values are listed.
+            analysis_answer = format_answer(question["answer_html"], analysis_answer)
         try:
-            analysis = llm_service.analyze_wrong(question["question_text"], attempt["correct_answer"],
+            analysis = llm_service.analyze_wrong(question["question_text"], analysis_answer,
                                                   attempt["user_answer"], question["category"], question["subcategory"],
                                                   image_context=image_context, missing_image_context=missing_images)
         except RuntimeError as exc:
