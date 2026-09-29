@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>스터디 에이전트</title>
+  <script src="/static/theme.js"></script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -22,7 +23,7 @@
       <div class="sidebar-bottom"><div class="status-dot" id="ai-dot"></div><span id="ai-status">AI 상태 확인 중</span></div>
     </aside>
     <main>
-      <header class="topbar"><div><span class="eyebrow">PERSONAL LEARNING SPACE</span><h1 id="page-title">대시보드</h1></div><span id="today-date"></span></header>
+      <header class="topbar"><div><span class="eyebrow">PERSONAL LEARNING SPACE</span><h1 id="page-title">대시보드</h1></div><div class="topbar-actions"><span id="today-date"></span><button id="theme-toggle" class="theme-toggle" type="button" aria-label="어두운 모드로 전환" aria-pressed="false"><span class="theme-icon" aria-hidden="true">☾</span><span class="theme-label">어두운 모드</span></button></div></header>
       <div id="notice" role="status"></div>
       <section id="view"></section>
     </main>

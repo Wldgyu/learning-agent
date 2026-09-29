@@ -41,3 +41,42 @@
 .exam-result{padding:17px}.exam-result-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}.exam-answer-key{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:7px;font-size:12px;line-height:1.6}
 @media(max-width:800px){.exam-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:570px){.exam-grid{grid-template-columns:1fr}.exam-top h2{font-size:19px}.exam-top p{font-size:11px}.exam-clock{padding:8px}.exam-clock strong{font-size:16px}.exam-footer{flex-wrap:wrap}.exam-footer span{order:3;width:100%;text-align:center}.exam-footer button:last-child{margin-left:auto}}
+
+/* A soft slate theme keeps study text readable without a near-black canvas. */
+:root{color-scheme:light}
+.topbar-actions{display:flex;align-items:center;gap:16px}
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:7px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);font-size:12px;font-weight:700;white-space:nowrap}
+.theme-toggle:hover{border-color:var(--blue);color:var(--blue)}
+.theme-toggle:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.theme-icon{font-size:18px;line-height:1}
+
+:root[data-theme="dark"]{color-scheme:dark;--bg:#222c39;--paper:#2c3949;--ink:#eaf0f6;--muted:#b0bfd0;--line:#435267;--blue:#a9b8ff;--blue-soft:#3a4667;--green:#79d5b2;--red:#f29a9a;--shadow:0 10px 30px rgba(13,21,31,.12)}
+[data-theme="dark"] .sidebar{background:#1d2837;color:#bdc9d8}
+[data-theme="dark"] .brand small,[data-theme="dark"] .sidebar nav button{color:#adbbcf}
+[data-theme="dark"] .sidebar nav button.active,[data-theme="dark"] .sidebar nav button:hover{background:#35445a;color:#fff}
+[data-theme="dark"] .sidebar-bottom{border-color:#3b4a5e}
+[data-theme="dark"] .eyebrow,[data-theme="dark"] .stat-foot,[data-theme="dark"] .row-meta,[data-theme="dark"] .ai-theory-result small{color:#a7b8cc}
+[data-theme="dark"] .hero{background:linear-gradient(110deg,#4b5ca1,#6474ae);box-shadow:0 12px 26px #111a2b33}
+[data-theme="dark"] .button:not(.light):not(.ghost):not(.muted):not(.danger){background:#596fcb;color:#fff}
+[data-theme="dark"] .button.light{background:#edf0ff;color:#405397}
+[data-theme="dark"] .button.ghost{background:var(--blue-soft);color:#c4ceff}
+[data-theme="dark"] .button.muted,[data-theme="dark"] .close{background:#405066;color:#e2eaf4}
+[data-theme="dark"] .button.danger{background:#5b3d48;color:#ffbdc0}
+[data-theme="dark"] .toolbar input,[data-theme="dark"] .toolbar select,[data-theme="dark"] .question-form textarea,[data-theme="dark"] .exam-question textarea{background:#344255;border-color:var(--line);color:var(--ink)}
+[data-theme="dark"] input::placeholder,[data-theme="dark"] textarea::placeholder{color:#a5b4c6}
+[data-theme="dark"] .row,[data-theme="dark"] .empty,[data-theme="dark"] .modal-card{background:var(--paper)}
+[data-theme="dark"] .row:hover,[data-theme="dark"] .exam-card:hover{border-color:#8597d3}
+[data-theme="dark"] .empty{border-color:#53647a}
+[data-theme="dark"] .row .num,[data-theme="dark"] .pill,[data-theme="dark"] .exam-clock{background:#3b4967;color:#c6d0ff}
+[data-theme="dark"] .pill.green,[data-theme="dark"] .exam-pager button.answered{background:#33544d;color:#a6ebcc;border-color:#477966}
+[data-theme="dark"] .pill.red{background:#60434b;color:#ffc4c4}
+[data-theme="dark"] .pill.gray{background:#414e60;color:#d0d9e5}
+[data-theme="dark"] .track{background:#415066}
+[data-theme="dark"] .skill strong,[data-theme="dark"] .theory-card p,[data-theme="dark"] .ai-progress{color:#b9c8dc}
+[data-theme="dark"] .question-text{background:#344255;border-color:var(--line)}
+[data-theme="dark"] .result,[data-theme="dark"] .ai-theory-result{background:#35445b}
+[data-theme="dark"] #notice.show{background:#544b3c;color:#ffdda7}
+[data-theme="dark"] .ai-status-error{color:#ffb2b2}
+[data-theme="dark"] .exam-pager button{background:#344255;border-color:var(--line);color:#d0dbeb}
+[data-theme="dark"] .exam-pager button.active{background:#596fcb;border-color:#8094e5;color:#fff}
+@media(max-width:570px){.topbar-actions{gap:8px}.theme-toggle{padding:7px 9px}}
