@@ -3,6 +3,7 @@ const view = $('#view');
 let currentView = 'dashboard';
 let bankPage = 1;
 let generatedPage = 1;
+let reviewPage = 1;
 let currentQuestion = null;
 let currentAttempt = null;
 let aiEnabled = false;
@@ -25,10 +26,10 @@ function setView(name) {
   if(examTimer){clearInterval(examTimer);examTimer=null}
   examState=null;
   currentView=name;
-  const title={dashboard:'대시보드',today:'오늘의 학습',bank:'문제은행',generated:'AI 생성 문제',exams:'회차별 시험',wrong:'오답노트',theory:'이론 노트'}[name];
+  const title={dashboard:'대시보드',today:'오늘의 학습',bank:'문제은행',generated:'AI 생성 문제',exams:'회차별 시험',wrong:'오답노트',review:'복습 문제',theory:'이론 노트'}[name];
   $('#page-title').textContent=title;
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===name));
-  ({dashboard,today,bank,generated,exams,wrong,theory})[name]().catch(fail);
+  ({dashboard,today,bank,generated,exams,wrong,review,theory})[name]().catch(fail);
 }
 function rowHtml(q, generated=false) {
   const name=generated ? 'AI 생성 문제' : `${q.year}년 ${q.round}회 · ${q.number}번`;
@@ -43,7 +44,7 @@ async function dashboard() {
     <div class="card"><div class="stat-label">정답률</div><div class="stat-value">${rate}%</div><div class="stat-foot">${data.correct}문제 정답</div></div>
     <div class="card"><div class="stat-label">학습 데이터</div><div class="stat-value">${status.questions}</div><div class="stat-foot">${status.rounds}개 회차</div></div>
     <div class="card"><div class="stat-label">권장 난이도</div><div class="stat-value">Lv.${data.difficulty}</div><div class="stat-foot">최근 5문제 기준</div></div></div>
-    <div class="section-head"><div><h2>오늘의 학습</h2><p>복습 예정 · 취약 분야 · 새 문제를 순서대로 학습하세요.</p></div></div>
+    <div class="section-head"><div><h2>오늘의 학습</h2><p>전에 푼 문제 3~5개를 복습하고 나머지는 새로운 기출문제를 풉니다.</p></div></div>
     <div class="hero"><div><small>YOUR DAILY PLAN</small><h2>오늘은 ${plan.items.length}문제를 준비했어요</h2><p>풀이 결과에 따라 다음 복습 날짜가 자동으로 조정됩니다.</p></div><button class="button light" data-view-go="today">학습 시작 →</button></div>
     <div class="grid split"><div><div class="section-head"><h2>취약 개념</h2></div><div class="card">${data.skills.length ? data.skills.slice(0,6).map(s=>`<div class="skill"><div class="skill-name">${esc(s.subcategory)}</div><div class="track"><i style="width:${Math.round(s.score*100)}%"></i></div><strong>${Math.round(s.score*100)}</strong></div>`).join('') : '<div class="note">문제를 풀면 분야별 숙련도가 표시됩니다.</div>'}</div></div>
     <div><div class="section-head"><h2>학습 흐름</h2></div><div class="card"><div class="note">문제 풀이 → 채점 → 오답 분석 → 개념 복습 → 유사 문제 → 다음 복습 예약</div><div class="actions"><button class="button ghost sm" data-view-go="bank">문제 찾기</button><button class="button ghost sm" data-view-go="exams">회차별 시험</button><button class="button ghost sm" data-view-go="wrong">오답 보기</button></div></div></div></div>`;
@@ -58,8 +59,9 @@ function renderToday() {
   const plan=todayPlan;
   const counts={};plan.items.forEach(q=>counts[q.category]=(counts[q.category]||0)+1);
   const done=plan.items.filter(q=>q.completed).length;
-  view.innerHTML=`<div class="section-head daily-heading"><div><h2>맞춤 학습 계획</h2><p>현재 권장 난이도 Lv.${plan.difficulty} · ${done}/${plan.items.length} 완료 · 분야별로 배분한 문제입니다.</p><p>새 문제로 바꿔도 기존 풀이 기록과 오답노트는 유지됩니다.</p></div><button id="refresh-today" class="button ghost">↻ 다른 20문제 받기</button></div><div class="category-summary">${Object.entries(counts).map(([category,count])=>`<span class="pill gray">${esc(category)} ${count}</span>`).join('')}</div>
-  <div class="list">${plan.items.length ? plan.items.map(q=>rowHtml(q,q.reason==='generated')).join('') : '<div class="empty">학습 문제가 없습니다.</div>'}</div>`;
+  const reviews=plan.items.filter(q=>q.reason==='review').length;
+  view.innerHTML=`<div class="section-head daily-heading"><div><h2>맞춤 학습 계획</h2><p>현재 권장 난이도 Lv.${plan.difficulty} · ${done}/${plan.items.length} 완료 · 복습 ${reviews}개 / 새 기출 ${plan.items.length-reviews}개</p><p>${plan.items.length<20?'아직 풀지 않은 기출문제가 부족해 준비 가능한 문제만 표시합니다.':'새 문제로 바꿔도 기존 풀이 기록과 오답노트는 유지됩니다.'}</p></div><button id="refresh-today" class="button ghost">↻ 오늘의 문제 20개 생성</button></div><div class="category-summary">${Object.entries(counts).map(([category,count])=>`<span class="pill gray">${esc(category)} ${count}</span>`).join('')}</div>
+  <div class="list">${plan.items.length ? plan.items.map(q=>rowHtml(q,q.generated)).join('') : '<div class="empty">학습 문제가 없습니다.</div>'}</div>`;
   $('#refresh-today').onclick=()=>refreshToday().catch(fail);
 }
 async function refreshToday() {
@@ -75,7 +77,7 @@ async function refreshToday() {
     notice(`${plan.items.length}문제로 오늘의 학습을 새로 준비했습니다.`);
   } finally {
     button.disabled=false;
-    button.textContent='↻ 다른 20문제 받기';
+    button.textContent='↻ 오늘의 문제 20개 생성';
   }
 }
 async function bank() {
@@ -155,6 +157,14 @@ async function wrong() {
   const data=await api('/api/wrong-answers');
   view.innerHTML=`<div class="section-head"><div><h2>다시 풀어볼 문제</h2><p>오답 원인과 다음 복습 날짜를 확인하세요.</p></div></div><div class="list">${data.items.length ? data.items.map(q=>`<div class="row" data-open="${q.question_id?'q':'g'}:${q.question_id||q.generated_question_id}"><div class="num">${q.number||'AI'}</div><div class="row-main"><div class="row-title">${esc(q.question_text||'AI 생성 문제')}</div><div class="row-meta">오답 ${q.wrong_count}회 · 다음 복습 ${esc((q.next_review_at||'').slice(0,10))}${q.wrong_reason?' · '+esc(q.wrong_reason):''}</div></div><span class="pill red">다시 풀기</span></div>`).join(''):'<div class="empty">아직 기록된 오답이 없습니다.</div>'}</div>`;
 }
+async function review() {
+  const data=await api(`/api/review-questions?page=${reviewPage}&size=20`);
+  if(currentView!=='review') return;
+  view.innerHTML=`<div class="section-head"><div><h2>복습 문제 ${data.total}개</h2><p>전에 풀었던 문제를 모았습니다. 문제를 열어 다시 풀 수 있습니다.</p></div></div><div class="list">${data.items.map(q=>rowHtml({...q,reason:'review'},Boolean(q.generated))).join('') || '<div class="empty">아직 풀었던 문제가 없습니다.</div>'}</div><div id="review-pages" class="page-controls"></div>`;
+  $('#review-pages').innerHTML=`<button class="button muted sm" id="review-prev" ${reviewPage===1?'disabled':''}>이전</button><span>${reviewPage} / ${Math.max(1,Math.ceil(data.total/20))}</span><button class="button muted sm" id="review-next" ${reviewPage*20>=data.total?'disabled':''}>다음</button>`;
+  $('#review-prev').onclick=()=>{reviewPage--;review().catch(fail)};
+  $('#review-next').onclick=()=>{reviewPage++;review().catch(fail)};
+}
 async function theory() {
   const data=await api('/api/theory');
   view.innerHTML=`<div class="section-head"><div><h2>핵심 개념 정리</h2><p>오답 뒤 짧게 복습하는 개념 카드입니다.</p></div></div><div class="grid split">${data.items.map(t=>`<div class="card theory-card"><small>${esc(t.category)} / ${esc(t.subcategory)}</small><h3>${esc(t.title||t.subcategory)}</h3><p>${esc(t.summary||'이 개념의 요약을 아직 만들지 않았습니다.')}</p>${t.example?`<div class="note">예시: ${esc(t.example)}</div>`:''}${t.common_mistakes?`<div class="note">자주 하는 실수: ${esc(t.common_mistakes)}</div>`:''}<div class="actions"><button class="button ghost sm" data-theory="${esc(t.category)}|${esc(t.subcategory)}">AI로 설명 만들기</button></div><div class="theory-ai-output" aria-live="polite"></div></div>`).join('')}</div>`;
@@ -175,7 +185,7 @@ async function explainTheory(button) {
 async function openQuestion(kind,id) {
   const generated=kind==='g';
   const q=await api(generated?`/api/generated/${id}`:`/api/questions/${id}`);
-  const dailyIndex=currentView==='today'&&todayPlan ? todayPlan.items.findIndex(item=>item.id===q.id&&(item.reason==='generated')===generated) : -1;
+  const dailyIndex=currentView==='today'&&todayPlan ? todayPlan.items.findIndex(item=>item.id===q.id&&Boolean(item.generated)===generated) : -1;
   currentQuestion={...q,generated,dailyIndex}; currentAttempt=null;
   const images=generated?[]:(q.local_images||[]);
   $('#modal-body').innerHTML=`${dailyIndex>=0?`<div class="note daily-position">오늘의 학습 ${dailyIndex+1} / ${todayPlan.items.length}</div>`:''}<span class="pill">${esc(q.category)} / ${esc(q.subcategory)}</span><h2 class="question-title">${generated?'AI 생성 문제':`${q.year}년 ${q.round}회 ${q.number}번`}</h2>
@@ -201,7 +211,7 @@ function completeDailyQuestion() {
     try {
       if(last){closeModal();return}
       const next=todayPlan.items[index+1];
-      await openQuestion(next.reason==='generated'?'g':'q',next.id);
+      await openQuestion(next.generated?'g':'q',next.id);
     } catch(error){button.disabled=false;fail(error)}
   };
 }

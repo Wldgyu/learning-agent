@@ -387,6 +387,28 @@ def wrong_answers():
         return {"items": [record(row) for row in rows]}
 
 
+@app.get("/api/review-questions")
+def review_questions(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100)):
+    with connect() as db:
+        source = """SELECT q.id,q.year,q.round,q.number,substr(q.question_text,1,150) AS preview,
+                    m.category,m.subcategory,0 AS generated,COUNT(*) AS attempt_count,
+                    MAX(a.created_at) AS last_attempt_at
+                    FROM attempt a JOIN question q ON q.id=a.question_id
+                    JOIN question_meta m ON m.question_id=q.id WHERE a.user_id=1
+                    GROUP BY q.id"""
+        generated = """SELECT g.id,NULL AS year,NULL AS round,NULL AS number,
+                       substr(g.question_text,1,150) AS preview,g.category,g.subcategory,
+                       1 AS generated,COUNT(*) AS attempt_count,MAX(a.created_at) AS last_attempt_at
+                       FROM attempt a JOIN generated_question g ON g.id=a.generated_question_id
+                       WHERE a.user_id=1 AND g.user_id=1 AND g.validation_status='valid'
+                       GROUP BY g.id"""
+        combined = f"({source} UNION ALL {generated})"
+        total = db.execute(f"SELECT COUNT(*) FROM {combined}").fetchone()[0]
+        rows = db.execute(f"SELECT * FROM {combined} ORDER BY last_attempt_at DESC,id DESC LIMIT ? OFFSET ?",
+                          (size, (page - 1) * size)).fetchall()
+        return {"total": total, "page": page, "items": [record(row) for row in rows]}
+
+
 @app.get("/api/theory")
 def theories():
     with connect() as db:

@@ -4,7 +4,6 @@ import json
 import random
 import re
 import sqlite3
-from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 
@@ -112,85 +111,49 @@ def build_plan(db: sqlite3.Connection, user_id: int = 1, refresh: bool = False):
         db.execute("DELETE FROM daily_plan WHERE user_id=? AND plan_date=?", (user_id, day))
         saved = []
     if not saved:
-        # A stable daily set: 20 questions distributed across the six current study areas.
         quotas = {"프로그래밍": 6, "데이터베이스": 4, "소프트웨어 공학": 3,
                   "네트워크": 3, "보안": 2, "기타": 2}
         rows = db.execute("""SELECT q.id,q.year,q.round,q.number,m.category,m.subcategory,
-                            COALESCE(s.score,0.5) AS skill_score,
-                            r.next_review_at,COALESCE(a.attempt_count,0) AS attempt_count
+                            COALESCE(a.attempt_count,0) AS attempt_count
                             FROM question q JOIN question_meta m ON m.question_id=q.id
-                            LEFT JOIN user_skill s ON s.user_id=? AND s.category=m.category AND s.subcategory=m.subcategory
-                            LEFT JOIN review_schedule r ON r.user_id=? AND r.question_id=q.id
                             LEFT JOIN (SELECT question_id,COUNT(*) AS attempt_count FROM attempt
-                                       WHERE user_id=? AND is_correct IS NOT NULL GROUP BY question_id) a ON a.question_id=q.id""",
-                          (user_id, user_id, user_id)).fetchall()
-        candidates = []
-        for row in rows:
-            item = dict(row)
-            if item["next_review_at"] and item["next_review_at"] <= now().isoformat():
-                item["reason"], item["priority"] = "review", 0
-            elif item["attempt_count"] == 0 and item["skill_score"] < 0.5:
-                item["reason"], item["priority"] = "weak", 2
-            elif item["attempt_count"] == 0:
-                item["reason"], item["priority"] = "new", 3
-            else:
-                item["reason"], item["priority"] = "practice", 4
-            item["generated"] = False
-            candidates.append(item)
-        generated = db.execute("""SELECT g.id,g.category,g.subcategory FROM generated_question g
-                                  LEFT JOIN attempt a ON a.generated_question_id=g.id AND a.user_id=?
-                                  WHERE g.user_id=? AND g.validation_status='valid' AND a.id IS NULL
-                                  ORDER BY g.id DESC LIMIT 2""", (user_id, user_id)).fetchall()
-        for row in generated:
-            candidates.append({"id": row["id"], "category": row["category"],
-                               "subcategory": row["subcategory"], "reason": "generated",
-                               "priority": 1, "skill_score": 0.5, "year": 0, "round": 0,
-                               "number": 0, "generated": True})
-        if refresh:
-            fresh = [item for item in candidates if (item["generated"], item["id"]) not in previous]
-            # Reuse old items only when the entire pool cannot supply 20 different questions.
-            candidates = fresh if len(fresh) >= 20 else fresh + [
-                item for item in candidates if (item["generated"], item["id"]) in previous]
-        random_order = {(item["generated"], item["id"]): random.random() for item in candidates}
-        picked = []
-        chosen = set()
-        selected_years = Counter()
+                                       WHERE user_id=? GROUP BY question_id) a ON a.question_id=q.id""",
+                          (user_id,)).fetchall()
+        source = [{**dict(row), "generated": False} for row in rows]
+        reviews = [item for item in source if item["attempt_count"]]
+        fresh = [item for item in source if not item["attempt_count"]]
+        generated_reviews = db.execute("""SELECT g.id,g.category,g.subcategory FROM generated_question g
+            WHERE g.user_id=? AND g.validation_status='valid' AND EXISTS
+            (SELECT 1 FROM attempt a WHERE a.user_id=? AND a.generated_question_id=g.id)""",
+            (user_id, user_id)).fetchall()
+        reviews += [{**dict(row), "generated": True} for row in generated_reviews]
 
-        def take(category: str, count: int, subcategory: str | None = None):
-            for _ in range(max(0, count)):
-                options = [candidate for candidate in candidates
-                           if (candidate["generated"], candidate["id"]) not in chosen
-                           and candidate["category"] == category
-                           and (subcategory is None or candidate["subcategory"] == subcategory)]
-                if not options:
-                    break
-                candidate = min(options, key=lambda item: (
-                    (item["generated"], item["id"]) in previous,
-                    item["priority"], selected_years[item["year"]], item["skill_score"],
-                    random_order[(item["generated"], item["id"])] if refresh else -item["year"],
-                    -item["round"], item["number"]))
-                key = (candidate["generated"], candidate["id"])
-                picked.append(candidate)
-                chosen.add(key)
-                selected_years[candidate["year"]] += 1
+        def preferred(pool):
+            unused = [item for item in pool if (item["generated"], item["id"]) not in previous]
+            used = [item for item in pool if (item["generated"], item["id"]) in previous]
+            random.shuffle(unused)
+            random.shuffle(used)
+            return unused + used
 
-        for subcategory in ("Java", "Python", "C"):
-            take("프로그래밍", 2, subcategory)
+        review_count = min(random.randint(3, 5), len(reviews))
+        picked_reviews = preferred(reviews)[:review_count]
+        fresh = preferred(fresh)
+        new_count = min(20 - review_count, len(fresh))
+        picked_new = []
+        remaining = fresh[:]
         for category, quota in quotas.items():
-            current = sum(item["category"] == category for item in picked)
-            take(category, quota - current)
-        if len(picked) < 20:
-            for candidate in candidates:
-                key = (candidate["generated"], candidate["id"])
-                if key not in chosen:
-                    picked.append(candidate); chosen.add(key)
-                if len(picked) == 20:
-                    break
-        for position, item in enumerate(picked[:20], 1):
+            target = min(round(quota * new_count / 20), new_count - len(picked_new))
+            matches = [item for item in remaining if item["category"] == category][:target]
+            picked_new.extend(matches)
+            selected_ids = {item["id"] for item in matches}
+            remaining = [item for item in remaining if item["id"] not in selected_ids]
+        picked_new.extend(remaining[:new_count - len(picked_new)])
+        picked = [(item, "review") for item in picked_reviews] + [(item, "new") for item in picked_new]
+        for position, (item, reason) in enumerate(picked, 1):
             db.execute("""INSERT INTO daily_plan(user_id,plan_date,position,question_id,generated_question_id,reason)
                           VALUES(?,?,?,?,?,?)""",
                        (user_id, day, position, None if item["generated"] else item["id"],
-                        item["id"] if item["generated"] else None, item["reason"]))
+                        item["id"] if item["generated"] else None, reason))
         saved = db.execute("SELECT * FROM daily_plan WHERE user_id=? AND plan_date=? ORDER BY position",
                            (user_id, day)).fetchall()
     items = []
@@ -204,5 +167,7 @@ def build_plan(db: sqlite3.Connection, user_id: int = 1, refresh: bool = False):
                                substr(question_text,1,150) AS preview,category,subcategory
                                FROM generated_question WHERE id=?""", (plan["generated_question_id"],)).fetchone()
         if row:
-            items.append({**dict(row), "reason": plan["reason"], "completed": bool(plan["completed_at"])})
+            items.append({**dict(row), "reason": plan["reason"],
+                          "generated": plan["question_id"] is None,
+                          "completed": bool(plan["completed_at"])})
     return items
