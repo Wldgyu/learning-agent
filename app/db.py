@@ -89,10 +89,10 @@ def initialize():
           completed_at TEXT, PRIMARY KEY(user_id, plan_date, position)
         );
         CREATE TABLE IF NOT EXISTS theory (
-          id INTEGER PRIMARY KEY, category TEXT NOT NULL, subcategory TEXT NOT NULL,
+          id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL, subcategory TEXT NOT NULL,
           title TEXT NOT NULL, summary TEXT NOT NULL, example TEXT NOT NULL DEFAULT '',
-          common_mistakes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'local',
-          UNIQUE(category, subcategory)
+          common_mistakes TEXT NOT NULL DEFAULT '', memorization_tip TEXT NOT NULL DEFAULT '',
+          source TEXT NOT NULL DEFAULT 'local', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS generated_question (
           id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL DEFAULT 1,
@@ -108,14 +108,93 @@ def initialize():
         CREATE INDEX IF NOT EXISTS idx_review_due ON review_schedule(user_id, next_review_at);
         CREATE INDEX IF NOT EXISTS idx_meta_category ON question_meta(category, subcategory);
         """)
+        # Migrate theory table if needed
+        cols = [r["name"] for r in db.execute("PRAGMA table_info(theory)").fetchall()]
+        sql_row = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='theory'").fetchone()
+        has_strict_unique = sql_row and "UNIQUE(category, subcategory)" in sql_row["sql"]
+        if "memorization_tip" not in cols or has_strict_unique:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS theory_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL,
+                    subcategory TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    example TEXT NOT NULL DEFAULT '',
+                    common_mistakes TEXT NOT NULL DEFAULT '',
+                    memorization_tip TEXT NOT NULL DEFAULT '',
+                    source TEXT NOT NULL DEFAULT 'local',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            select_mem = "memorization_tip" if "memorization_tip" in cols else "''"
+            select_created = "created_at" if "created_at" in cols else "CURRENT_TIMESTAMP"
+            db.execute(f"""
+                INSERT INTO theory_new (id, category, subcategory, title, summary, example, common_mistakes, memorization_tip, source, created_at)
+                SELECT id, category, subcategory, title, summary, example, common_mistakes, {select_mem}, source, {select_created}
+                FROM theory
+            """)
+            db.execute("DROP TABLE theory")
+            db.execute("ALTER TABLE theory_new RENAME TO theory")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_theory_category ON theory(category, subcategory)")
+
         for row in db.execute("SELECT q.id, q.question_text FROM question q LEFT JOIN question_meta m ON m.question_id=q.id WHERE m.question_id IS NULL"):
             category, subcategory = classify(row["question_text"])
             db.execute("INSERT INTO question_meta(question_id, category, subcategory) VALUES(?,?,?)",
                        (row["id"], category, subcategory))
-        db.execute("INSERT OR IGNORE INTO theory(category,subcategory,title,summary,example,common_mistakes) VALUES(?,?,?,?,?,?)",
-                   ("프로그래밍", "Java", "Java 코드 읽기", "오버로딩은 인자 타입으로 컴파일 시 선택되고, 오버라이딩은 실제 객체 타입에 따라 실행됩니다.", "상속 관계에서 참조 타입과 객체 타입을 구분해 메서드 호출을 추적합니다.", "문자열 결합과 정수 덧셈의 평가 순서를 혼동하지 마세요."))
-        db.execute("INSERT OR IGNORE INTO theory(category,subcategory,title,summary,example,common_mistakes) VALUES(?,?,?,?,?,?)",
-                   ("데이터베이스", "SQL", "SQL 결과 추적", "FROM, JOIN, WHERE, GROUP BY, SELECT 순서로 중간 결과를 살펴보세요.", "COUNT(*)는 행 수를, COUNT(DISTINCT x)는 서로 다른 x 값을 셉니다.", "집계 함수가 반환하는 한 행과 집계 대상 행 수를 구분하세요."))
+
+        base_theories = [
+            ("프로그래밍", "Java", "Java 객체지향 & 코드 실행 원리",
+             "오버로딩은 인자(타입/개수)로 컴파일 시점에 결정되고, 오버라이딩은 런타임에 실제 생성된 객체의 메서드가 동적으로 호출됩니다.",
+             "Parent p = new Child(); // p.method() 호출 시 Child의 오버라이딩 메서드 실행",
+             "문자열 결합(+)과 정수 덧셈의 연산 우선순위 주의: \"결과:\" + 1 + 2 는 \"결과:12\"가 됩니다.",
+             "💡 [Java 암기 팁]\n- '오버로딩(Overloading)' = 과적(이름 같고 짐/매개변수가 다름)\n- '오버라이딩(Overriding)' = 덮어쓰기(상속받아 재정의)\n- 자식 객체 생성 시 부모 생성자(super())가 먼저 실행!"),
+            ("데이터베이스", "SQL·설계", "SQL 연산 순서 & 집계 함수 원리",
+             "SQL 실행 순서는 FROM → ON → JOIN → WHERE → GROUP BY → HAVING → SELECT → DISTINCT → ORDER BY 순서로 평가됩니다.",
+             "SELECT dept, COUNT(*) FROM emp WHERE salary >= 3000 GROUP BY dept HAVING COUNT(*) >= 2;",
+             "GROUP BY에 지정하지 않은 일반 컬럼을 SELECT 절에 단독으로 쓰는 실수 주의.",
+             "💡 [SQL 실행 순서 암기: 프온조웨 그해셀디옵]\n- WHERE 절에는 집계 함수(COUNT, SUM 등) 사용 불가 → HAVING 절 사용!\n- COUNT(*)는 NULL 포함 전체 행 수, COUNT(컬럼)은 NULL 제외 행 수"),
+            ("프로그래밍", "C", "C 언어 포인터 & 배열 연산 핵심",
+             "포인터 변수는 주소값을 저장하며, *p는 역참조(값), &x는 주소 추출입니다. 배열 이름은 첫 번째 요소의 시작 주소를 나타냅니다.",
+             "int arr[3] = {10, 20, 30}; int *p = arr; *(p+1) == 20;",
+             "연산자 우선순위 착각: 증감 연산자(++)와 역참조(*) 우선순위를 괄호 없이 혼동하지 말 것.",
+             "💡 [C 포인터 암기 팁]\n- *p++: 현재 p가 가리키는 값을 읽은 후 p의 주소 1 증가\n- (*p)++: p가 가리키는 실제 데이터 값을 1 증가\n- 문자열 끝에는 항상 널 문자('\\0')가 포함됨을 계산!"),
+            ("프로그래밍", "Python", "Python 슬라이싱 & 컬렉션 다루기",
+             "Python 슬라이싱은 [시작:끝:간격] 형태로 동작하며, '끝' 인덱스는 포함되지 않습니다. 음수 인덱스는 뒤에서부터 -1로 카운트합니다.",
+             "nums = [10, 20, 30, 40, 50]; print(nums[1:4]) # [20, 30, 40]",
+             "인덱스 범위 착각: [1:3]은 인덱스 1과 2만 포함되고 3은 제외됩니다.",
+             "💡 [Python 암기 팁]\n- s[::-1]: 문자열 전체 역순 뒤집기\n- list.pop(): 맨 뒤 요소 꺼내기, list.append(): 맨 뒤 추가\n- set은 중복 불허, dictionary는 key-value 쌍"),
+            ("소프트웨어 공학", "개발·테스트", "결합도·응집도 & 소프트웨어 테스트",
+             "모듈의 독립성을 높이려면 '응집도는 높이고(High Cohesion), 결합도는 낮춰야(Low Coupling)' 합니다.",
+             "화이트박스 테스트: 문장/분기/조건 커버리지\n블랙박스 테스트: 동등분할, 경계값 분석, 원인-효과 그래프",
+             "응집도와 결합도의 순서를 반대로 외우거나, 블랙박스 테스트와 화이트박스 기법 종류를 섞어 쓰는 실수 주의.",
+             "💡 [두문자 암기 비법]\n- 응집도(약함→강함): 우 논 시 절 통 순 기 (우연, 논리, 시간, 절차, 통신, 순차, 기능)\n- 결합도(약함/좋음→강함/나쁨): 자 스 제 외 공 내 (자료, 스탬프, 제어, 외부, 공통, 내용)"),
+            ("네트워크", "네트워크 개념", "OSI 7계층 & IP 서브넷 계산",
+             "OSI 7계층은 물리, 데이터링크, 네트워크, 전송, 세션, 표현, 응용 계층으로 구성되며, 각 계층마다 고유 프로토콜과 전송 단위가 있습니다.",
+             "/24 서브넷: 255.255.255.0 (호스트 254개)\n/26 서브넷: 255.255.255.192 (서브넷 4개, 호스트 62개씩)",
+             "네트워크 주소(첫 번째)와 브로드캐스트 주소(마지막) 2개는 호스트로 사용할 수 없으므로 호스트 개수 계산 시 항상 -2를 해야 합니다.",
+             "💡 [네트워크 암기 비법]\n- OSI 7계층(하위→상위): 물 데 네 전 세 표 응\n- 전송 계층 단위: 세그먼트(TCP/UDP)\n- 네트워크 계층 단위: 패킷(IP/라우터)\n- 데이터링크 단위: 프레임(MAC/스위치)"),
+            ("보안", "보안 개념", "보안 3대 요소 & 암호 알고리즘",
+             "정보보안의 3대 요소는 기밀성(Confidentiality), 무결성(Integrity), 가용성(Availability)이며, 암호화는 대칭키와 비대칭키(공개키)로 구분됩니다.",
+             "대칭키 블록 암호: DES(64비트), AES(128/192/256비트), SEED(한국 KISA, 128비트), ARIA(국정원)",
+             "RSA를 대칭키로 혼동하거나, 해시 함수를 양방향 복호화가 가능한 암호화로 착각하는 실수.",
+             "💡 [보안 암기 비법: 기무가]\n- 대칭키(비밀키): 속도 빠름, 키 배송 문제 (DES, AES, SEED, ARIA)\n- 비대칭키(공개키): 속도 느림, 키 관리 용이 (RSA, ECC, 디피-헬만)\n- 무결성 검증: 해시 함수 (SHA, MD5)"),
+            ("기타", "기본 개념", "정보처리기사 신기술 및 핵심 표준",
+             "데이터 웨어하우스, 빅데이터, 클라우드 컴퓨팅 및 소프트웨어 아키텍처 패턴의 기본 개념을 정리합니다.",
+             "아키텍처 패턴: 계층(Layer), 클라이언트-서버, 파이프-필터, MVC 패턴",
+             "ACID 특성 중 원자성(All or Nothing)과 일관성의 차이를 혼동하지 않기.",
+             "💡 [핵심 용어 암기]\n- ETL: 추출(Extract) → 변환(Transform) → 적재(Load)\n- 트랜잭션 4대 특성(ACID): 원자성(Atomicity), 일관성(Consistency), 격리성(Isolation), 지속성(Durability)")
+        ]
+        # Clean up old single 'SQL' subcategory to 'SQL·설계' if present
+        db.execute("UPDATE theory SET subcategory='SQL·설계' WHERE category='데이터베이스' AND subcategory='SQL'")
+        for cat, subcat, title, summary, example, mistakes, mem in base_theories:
+            existing = db.execute("SELECT id FROM theory WHERE category=? AND subcategory=? AND source='local'", (cat, subcat)).fetchone()
+            if not existing:
+                db.execute("""INSERT INTO theory(category, subcategory, title, summary, example, common_mistakes, memorization_tip, source)
+                              VALUES(?,?,?,?,?,?,?,?)""", (cat, subcat, title, summary, example, mistakes, mem, 'local'))
+            else:
+                db.execute("""UPDATE theory SET title=?, summary=?, example=?, common_mistakes=?, memorization_tip=?
+                              WHERE id=?""", (title, summary, example, mistakes, mem, existing["id"]))
 
 
 def classify(text: str) -> tuple[str, str]:

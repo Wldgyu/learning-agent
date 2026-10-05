@@ -288,3 +288,73 @@ def explain_concept(category: str, subcategory: str, example_question: str) -> d
         json.dumps({"category": category, "subcategory": subcategory,
                     "example_question": example_question[:2000]}, ensure_ascii=False),
     )
+
+
+def analyze_wrong_types(type_groups: list[dict]) -> list[dict]:
+    """Analyze wrong questions grouped by category/subcategory and generate
+    concise theory summaries with easy-to-memorize tips and mistake traps."""
+    if not type_groups:
+        return []
+
+    system = (
+        '정보처리기사 실기 시험 전문 강사이자 학습 코치다. '
+        '학습자가 틀린 문제들을 분석하여, 다시는 틀리지 않도록 핵심 이론 요약과 쉽게 외울 수 있는 간단한 암기 비법 자료를 작성한다. '
+        '입력받은 각 유형(category/subcategory)별로 1개씩 명쾌하고 완결된 이론 카드를 생성한다. '
+        '반드시 JSON 객체만 반환한다. 모든 자연어 설명은 한국어로 작성한다. '
+        'JSON 형식: {"theories": [{"category": "...", "subcategory": "...", "title": "...", "summary": "...", "memorization_tip": "...", "common_mistakes": "...", "example": "..."}]}. '
+        'theories 배열의 각 객체 필드:\n'
+        '- category: 입력받은 카테고리 (문자열)\n'
+        '- subcategory: 입력받은 서브카테고리 (문자열)\n'
+        '- title: 해당 유형의 핵심 주제 제목 (문자열)\n'
+        '- summary: 군더더기 없는 핵심 이론 정의 및 원리 요약 2~4문장 (문자열)\n'
+        '- memorization_tip: 쉽게 외우는 암기 비법 & 꿀팁. 두문자 암기법, 한 줄 요약 공식, 직관적인 비유, 10초 암기 키포인트를 글머리 기호로 정리 (문자열)\n'
+        '- common_mistakes: 자주 틀리는 함정 & 오답 방지 주의점 2~3가지 (문자열)\n'
+        '- example: 핵심 예시 코드, SQL 구문 또는 풀이 공식 패턴 (문자열)\n'
+        '코드나 SQL, 영문 약어 원문은 보존하되 설명은 쉬운 한국어로 작성한다.'
+    )
+
+    results = []
+    for i in range(0, len(type_groups), 2):
+        batch = type_groups[i:i + 2]
+        payload = []
+        for g in batch:
+            payload.append({
+                "category": g.get("category", "기타"),
+                "subcategory": g.get("subcategory", "기본 개념"),
+                "sample_wrong_questions": [
+                    {
+                        "question": q.get("question", "")[:400],
+                        "correct_answer": q.get("correct_answer", "")[:200],
+                        "user_answer": q.get("user_answer", "")[:200],
+                        "wrong_reason": q.get("wrong_reason", "")[:200]
+                    }
+                    for q in g.get("wrong_questions", [])[:4]
+                ]
+            })
+
+        prompt = json.dumps({"groups": payload}, ensure_ascii=False)
+        raw = ask_json(system, prompt, max_tokens=3200)
+        theories = raw.get("theories")
+        if isinstance(theories, list):
+            for item in theories:
+                if isinstance(item, dict):
+                    results.append({
+                        "category": str(item.get("category") or batch[0].get("category", "기타")),
+                        "subcategory": str(item.get("subcategory") or batch[0].get("subcategory", "기본 개념")),
+                        "title": str(item.get("title") or "핵심 오답 분석 이론"),
+                        "summary": str(item.get("summary") or ""),
+                        "memorization_tip": str(item.get("memorization_tip") or ""),
+                        "common_mistakes": str(item.get("common_mistakes") or ""),
+                        "example": str(item.get("example") or "")
+                    })
+        elif isinstance(raw, dict) and "summary" in raw:
+            results.append({
+                "category": str(raw.get("category") or batch[0].get("category", "기타")),
+                "subcategory": str(raw.get("subcategory") or batch[0].get("subcategory", "기본 개념")),
+                "title": str(raw.get("title") or "핵심 오답 분석 이론"),
+                "summary": str(raw.get("summary") or ""),
+                "memorization_tip": str(raw.get("memorization_tip") or ""),
+                "common_mistakes": str(raw.get("common_mistakes") or ""),
+                "example": str(raw.get("example") or "")
+            })
+    return results

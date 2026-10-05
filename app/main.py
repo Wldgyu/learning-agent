@@ -35,8 +35,8 @@ async def security_headers(request, call_next):
         "img-src 'self'; connect-src 'self'; object-src 'none'; "
         "base-uri 'none'; frame-ancestors 'none'"
     )
-    if request.url.path.startswith("/api/"):
-        response.headers["Cache-Control"] = "no-store"
+    if request.url.path.startswith("/api/") or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return response
 
 
@@ -93,6 +93,16 @@ class GenerateIn(BaseModel):
 class TheoryIn(BaseModel):
     category: str = Field(min_length=1, max_length=100)
     subcategory: str = Field(min_length=1, max_length=100)
+
+
+class WrongTypeItem(BaseModel):
+    category: str = Field(default="", max_length=100)
+    subcategory: str = Field(default="", max_length=100)
+
+
+class WrongAnalyzeIn(BaseModel):
+    types: list[WrongTypeItem] = Field(default_factory=list)
+    wrong_ids: list[int] = Field(default_factory=list)
 
 
 class ExamAnswer(BaseModel):
@@ -381,10 +391,105 @@ def refresh_today():
 @app.get("/api/wrong-answers")
 def wrong_answers():
     with connect() as db:
-        rows = db.execute("""SELECT w.*,q.year,q.round,q.number,q.question_text
-                             FROM wrong_answer w LEFT JOIN question q ON q.id=w.question_id
-                             WHERE w.user_id=1 ORDER BY w.last_wrong_at DESC LIMIT 100""").fetchall()
+        rows = db.execute("""
+            SELECT w.id, w.user_id, w.question_id, w.generated_question_id,
+                   w.last_attempt_id,
+                   w.user_answer, w.wrong_reason, w.weak_concept, w.wrong_count,
+                   w.last_wrong_at, w.next_review_at,
+                   COALESCE(q.year, NULL) AS year,
+                   COALESCE(q.round, NULL) AS round,
+                   COALESCE(q.number, NULL) AS number,
+                   COALESCE(q.question_text, g.question_text) AS question_text,
+                   COALESCE(q.answer, g.answer) AS correct_answer,
+                   COALESCE(m.category, g.category, '기타') AS category,
+                   COALESCE(m.subcategory, g.subcategory, '기본 개념') AS subcategory
+            FROM wrong_answer w
+            LEFT JOIN question q ON q.id=w.question_id
+            LEFT JOIN question_meta m ON m.question_id=q.id
+            LEFT JOIN generated_question g ON g.id=w.generated_question_id
+            WHERE w.user_id=1
+            ORDER BY w.last_wrong_at DESC LIMIT 200
+        """).fetchall()
         return {"items": [record(row) for row in rows]}
+
+
+@app.post("/api/wrong-answers/analyze")
+def analyze_wrongs(payload: WrongAnalyzeIn):
+    if not llm_service.available():
+        raise HTTPException(503, ".env에 API 키를 입력하세요.")
+
+    with connect() as db:
+        query = """
+            SELECT w.id, w.user_answer, w.wrong_reason, w.weak_concept, w.wrong_count,
+                   COALESCE(q.question_text, g.question_text, '') AS question_text,
+                   COALESCE(q.answer, g.answer, '') AS correct_answer,
+                   COALESCE(m.category, g.category, '기타') AS category,
+                   COALESCE(m.subcategory, g.subcategory, '기본 개념') AS subcategory
+            FROM wrong_answer w
+            LEFT JOIN question q ON q.id=w.question_id
+            LEFT JOIN question_meta m ON m.question_id=q.id
+            LEFT JOIN generated_question g ON g.id=w.generated_question_id
+            WHERE w.user_id=1
+        """
+        params = []
+        if payload.wrong_ids:
+            placeholders = ",".join("?" for _ in payload.wrong_ids)
+            query += f" AND w.id IN ({placeholders})"
+            params.extend(payload.wrong_ids)
+
+        rows = [record(r) for r in db.execute(query, params).fetchall()]
+
+        if payload.types:
+            type_pairs = {(t.category, t.subcategory) for t in payload.types}
+            rows = [r for r in rows if (r["category"], r["subcategory"]) in type_pairs]
+
+        if not rows:
+            raise HTTPException(400, "분석할 오답 문제가 선택되지 않았습니다.")
+
+        groups_dict = {}
+        for r in rows:
+            key = (r["category"], r["subcategory"])
+            if key not in groups_dict:
+                groups_dict[key] = []
+            groups_dict[key].append({
+                "question": r["question_text"],
+                "correct_answer": r["correct_answer"],
+                "user_answer": r["user_answer"],
+                "wrong_reason": r["wrong_reason"],
+                "weak_concept": r["weak_concept"]
+            })
+
+        type_groups = [
+            {"category": cat, "subcategory": subcat, "wrong_questions": qlist}
+            for (cat, subcat), qlist in groups_dict.items()
+        ]
+
+    try:
+        generated_theories = llm_service.analyze_wrong_types(type_groups)
+    except RuntimeError as exc:
+        raise ai_http_error(exc) from exc
+
+    saved = []
+    with connect() as db:
+        for t in generated_theories:
+            cursor = db.execute("""
+                INSERT INTO theory(category, subcategory, title, summary, example, common_mistakes, memorization_tip, source)
+                VALUES(?,?,?,?,?,?,?,?)
+            """, (
+                t["category"],
+                t["subcategory"],
+                t["title"],
+                t["summary"],
+                t.get("example", ""),
+                t.get("common_mistakes", ""),
+                t.get("memorization_tip", ""),
+                "ai_wrong_analysis"
+            ))
+            t["id"] = cursor.lastrowid
+            t["source"] = "ai_wrong_analysis"
+            saved.append(t)
+
+    return {"items": saved}
 
 
 @app.get("/api/review-questions")
@@ -412,12 +517,24 @@ def review_questions(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=
 @app.get("/api/theory")
 def theories():
     with connect() as db:
-        return {"items": [record(row) for row in db.execute("""SELECT m.category,m.subcategory,t.id,t.title,t.summary,
-                      t.example,t.common_mistakes,t.source FROM
-                      (SELECT DISTINCT category,subcategory FROM question_meta) m
-                      LEFT JOIN theory t ON t.category=m.category AND t.subcategory=m.subcategory
-                                         AND t.source='local'
-                      ORDER BY m.category,m.subcategory""")]}
+        rows = db.execute("""
+            SELECT id, category, subcategory, title, summary, example, common_mistakes,
+                   memorization_tip, source, created_at
+            FROM theory
+            ORDER BY CASE WHEN source='ai_wrong_analysis' THEN 0 ELSE 1 END,
+                     id DESC
+        """).fetchall()
+        return {"items": [record(row) for row in rows]}
+
+
+@app.delete("/api/theory/{theory_id}")
+def delete_theory(theory_id: int):
+    with connect() as db:
+        row = db.execute("SELECT id FROM theory WHERE id=?", (theory_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "이론 카드를 찾을 수 없습니다.")
+        db.execute("DELETE FROM theory WHERE id=?", (theory_id,))
+        return {"ok": True, "id": theory_id}
 
 
 @app.post("/api/theory/explain")
