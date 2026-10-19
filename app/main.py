@@ -102,7 +102,9 @@ class WrongTypeItem(BaseModel):
 
 class WrongAnalyzeIn(BaseModel):
     types: list[WrongTypeItem] = Field(default_factory=list)
-    wrong_ids: list[int] = Field(default_factory=list)
+    wrong_ids: list[int] = Field(default_factory=list, max_length=500)
+    question_ids: list[int] = Field(default_factory=list, max_length=500)
+    focus: str = Field(default="", max_length=500)
 
 
 class ExamAnswer(BaseModel):
@@ -282,8 +284,9 @@ def review_answer(attempt_id: int, payload: ReviewIn):
 def analyze_attempt(attempt_id: int):
     with connect() as db:
         attempt = db.execute("SELECT * FROM attempt WHERE id=?", (attempt_id,)).fetchone()
-        if attempt is None or attempt["is_correct"] != 0:
-            raise HTTPException(400, "채점이 끝난 오답만 분석할 수 있습니다.")
+        if attempt is None or attempt["is_correct"] not in (0, 1):
+            raise HTTPException(400, "채점이 끝난 문제만 분석할 수 있습니다.")
+        was_correct = attempt["is_correct"] == 1
         if attempt["question_id"]:
             question = require_question(db, attempt["question_id"])
         else:
@@ -299,7 +302,8 @@ def analyze_attempt(attempt_id: int):
         try:
             analysis = llm_service.analyze_wrong(question["question_text"], analysis_answer,
                                                   attempt["user_answer"], question["category"], question["subcategory"],
-                                                  image_context=image_context, missing_image_context=missing_images)
+                                                  image_context=image_context, missing_image_context=missing_images,
+                                                  was_correct=was_correct)
         except RuntimeError as exc:
             raise ai_http_error(exc) from exc
         if not isinstance(analysis, dict):
@@ -311,7 +315,7 @@ def analyze_attempt(attempt_id: int):
                     "steps": [ai_text(item) for item in steps] if isinstance(steps, list) else [],
                     "next_tip": ai_text(analysis.get("next_tip")),
                     "weak_concepts": [ai_text(item) for item in concepts] if isinstance(concepts, list) else []}
-        if missing_images:
+        if missing_images or was_correct:
             return analysis
         id_column = "question_id" if attempt["question_id"] else "generated_question_id"
         db.execute(f"""UPDATE wrong_answer SET wrong_reason=?,weak_concept=? WHERE user_id=1 AND {id_column}=?""",
@@ -436,6 +440,10 @@ def analyze_wrongs(payload: WrongAnalyzeIn):
             placeholders = ",".join("?" for _ in payload.wrong_ids)
             query += f" AND w.id IN ({placeholders})"
             params.extend(payload.wrong_ids)
+        if payload.question_ids:
+            placeholders = ",".join("?" for _ in payload.question_ids)
+            query += f" AND w.question_id IN ({placeholders})"
+            params.extend(payload.question_ids)
 
         rows = [record(r) for r in db.execute(query, params).fetchall()]
 
@@ -465,7 +473,7 @@ def analyze_wrongs(payload: WrongAnalyzeIn):
         ]
 
     try:
-        generated_theories = llm_service.analyze_wrong_types(type_groups)
+        generated_theories = llm_service.analyze_wrong_types(type_groups, payload.focus)
     except RuntimeError as exc:
         raise ai_http_error(exc) from exc
 
@@ -473,13 +481,15 @@ def analyze_wrongs(payload: WrongAnalyzeIn):
     with connect() as db:
         for t in generated_theories:
             cursor = db.execute("""
-                INSERT INTO theory(category, subcategory, title, summary, example, common_mistakes, memorization_tip, source)
-                VALUES(?,?,?,?,?,?,?,?)
+                INSERT INTO theory(category, subcategory, title, summary, detailed_explanation, example,
+                                   common_mistakes, memorization_tip, source)
+                VALUES(?,?,?,?,?,?,?,?,?)
             """, (
                 t["category"],
                 t["subcategory"],
                 t["title"],
                 t["summary"],
+                t.get("detailed_explanation", ""),
                 t.get("example", ""),
                 t.get("common_mistakes", ""),
                 t.get("memorization_tip", ""),
@@ -518,7 +528,7 @@ def review_questions(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=
 def theories():
     with connect() as db:
         rows = db.execute("""
-            SELECT id, category, subcategory, title, summary, example, common_mistakes,
+            SELECT id, category, subcategory, title, summary, detailed_explanation, example, common_mistakes,
                    memorization_tip, source, created_at
             FROM theory
             ORDER BY CASE WHEN source='ai_wrong_analysis' THEN 0 ELSE 1 END,

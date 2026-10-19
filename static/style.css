@@ -159,3 +159,44 @@
 [data-theme="dark"] .loading-subtext{background:#263242;color:#b0c0d4}
 [data-theme="dark"] .success-callout{background:#1e3a30;border-color:#2e604d;color:#c4f3dd}
 @media(max-width:570px){.topbar-actions{gap:8px}.theme-toggle{padding:7px 9px}}
+
+/* Exam result detail & AI analysis */
+.exam-score-hero{align-items:center}
+.score-ring{--score:0;width:92px;height:92px;border-radius:50%;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;background:conic-gradient(#fff calc(var(--score)*1%),rgba(255,255,255,.22) 0);position:relative;animation:ringIn .6s ease}
+.score-ring::before{content:"";position:absolute;inset:8px;border-radius:50%;background:rgba(40,52,120,.55)}
+.score-ring strong,.score-ring small{position:relative;line-height:1}.score-ring strong{font-size:26px}.score-ring small{font-size:11px;opacity:.85;margin-top:3px}
+@keyframes ringIn{from{transform:scale(.8);opacity:0}to{transform:scale(1);opacity:1}}
+.exam-result.clickable{cursor:pointer;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease;border-left:4px solid var(--line)}
+.exam-result.clickable:hover,.exam-result.clickable:focus-visible{transform:translateY(-2px);border-color:var(--blue);box-shadow:0 14px 30px rgba(35,49,96,.1);outline:none}
+.exam-result.wrong{border-left-color:var(--red)}.exam-result.correct{border-left-color:var(--green)}.exam-result.pending{border-left-color:var(--muted)}
+.exam-result-cat{font-weight:500;font-size:12px;color:var(--muted);margin-left:6px}
+.exam-result-preview{font-size:13px;color:var(--muted);margin-bottom:10px;overflow-wrap:anywhere}
+.exam-result-foot{display:flex;align-items:center;gap:8px;margin-top:10px}
+.link-hint{margin-left:auto;font-size:12px;font-weight:700;color:var(--blue)}
+.answer-compare{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
+.answer-compare.compact{margin:0}
+.answer-box{border-radius:12px;padding:10px 13px;border:1px solid var(--line);background:var(--bg);min-width:0}
+.answer-box small{display:block;font-size:11px;font-weight:800;letter-spacing:.02em;margin-bottom:4px;color:var(--muted)}
+.answer-box span{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px}
+.answer-box.mine.wrong{background:#fff3f3;border-color:#f6caca}.answer-box.mine.wrong small{color:#c24848}
+.answer-box.mine.correct{background:#eefaf5;border-color:#bfe8d6}.answer-box.mine.correct small{color:#228a68}
+.answer-box.key{background:var(--blue-soft);border-color:#d5dbfb}.answer-box.key small{color:var(--blue)}
+.exam-detail-top{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:6px}
+.exam-detail-nav{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+#exam-detail-ai{margin-top:6px}
+.ai-analysis-title{display:block;color:var(--blue);font-size:15px;margin-bottom:8px}
+.explain-box{background:#f0f6ff;border:1px solid #cfe0fb;color:#1f3d6b}
+.explain-box .theory-box-title{color:#2b5cb8}
+.focus-input-box{margin:14px 0 4px;display:flex;flex-direction:column;gap:6px}
+.focus-input-box textarea{width:100%;min-height:70px;resize:vertical;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:13px;background:var(--paper);color:var(--ink)}
+.focus-input-box textarea:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
+@media(max-width:640px){.answer-compare{grid-template-columns:1fr}.score-ring{width:72px;height:72px}.score-ring strong{font-size:20px}}
+[data-theme="dark"] .answer-box{background:#344255}
+[data-theme="dark"] .answer-box.mine.wrong{background:#4a3038;border-color:#6a4450}[data-theme="dark"] .answer-box.mine.wrong small{color:#ffaaaa}
+[data-theme="dark"] .answer-box.mine.correct{background:#2b4a42;border-color:#3f6c5d}[data-theme="dark"] .answer-box.mine.correct small{color:#8fe0c0}
+[data-theme="dark"] .answer-box.key{background:#36406a;border-color:#4d5a8f}
+[data-theme="dark"] .explain-box{background:#24344d;border-color:#3a5274;color:#d6e4fb}
+[data-theme="dark"] .explain-box .theory-box-title{color:#9cc0ff}
+[data-theme="dark"] .focus-input-box textarea{background:#344255;border-color:var(--line)}
+[data-theme="dark"] .exam-result.clickable:hover{box-shadow:0 14px 30px #0b122033}
+.exam-results-head{flex-wrap:wrap;gap:12px;align-items:flex-end}.exam-results-head>div:first-child{flex:1 1 320px}.exam-results-head .actions{flex-wrap:wrap;margin:0}

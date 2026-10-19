@@ -136,6 +136,9 @@ def initialize():
             """)
             db.execute("DROP TABLE theory")
             db.execute("ALTER TABLE theory_new RENAME TO theory")
+        theory_cols = [r["name"] for r in db.execute("PRAGMA table_info(theory)").fetchall()]
+        if "detailed_explanation" not in theory_cols:
+            db.execute("ALTER TABLE theory ADD COLUMN detailed_explanation TEXT NOT NULL DEFAULT ''")
         db.execute("CREATE INDEX IF NOT EXISTS idx_theory_category ON theory(category, subcategory)")
 
         for row in db.execute("SELECT q.id, q.question_text FROM question q LEFT JOIN question_meta m ON m.question_id=q.id WHERE m.question_id IS NULL"):

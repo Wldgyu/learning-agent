@@ -44,6 +44,13 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(payload["max_tokens"], 1400)
         self.assertNotIn("reasoning_budget", payload)
 
+    def test_default_model_is_nemotron_3_5_with_reasoning_budget(self):
+        self.opener.open.return_value = response()
+        llm._request_json("코치", "자료", 1400)
+        payload = json.loads(self.opener.open.call_args.args[0].data)
+        self.assertEqual(payload["model"], "nvidia/nemotron-3.5-super-vl-120b-a12b")
+        self.assertEqual(payload["reasoning_budget"], 2048)
+
     def test_code_fenced_json_is_parsed(self):
         self.opener.open.return_value = response('```json\n{"feedback":"한국어"}\n```')
         self.assertEqual(llm._request_json("코치", "자료"), {"feedback": "한국어"})

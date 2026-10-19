@@ -32,6 +32,7 @@ class WrongAnalysisApiTests(unittest.TestCase):
                 "subcategory": "Java",
                 "title": "Java 오버라이딩 테스트",
                 "summary": "오버라이딩 시 실제 객체 타입의 메서드가 호출됩니다.",
+                "detailed_explanation": "부모 타입 변수라도 실제 객체가 자식이면 자식 메서드가 실행됩니다.",
                 "memorization_tip": "선언은 부모, 실행은 자식!",
                 "common_mistakes": "오버로딩과 오버라이딩 혼동",
                 "example": "Parent p = new Child();"
@@ -40,9 +41,11 @@ class WrongAnalysisApiTests(unittest.TestCase):
 
         payload = WrongAnalyzeIn(
             types=[WrongTypeItem(category="프로그래밍", subcategory="Java")],
-            wrong_ids=[]
+            wrong_ids=[],
+            focus="오버라이딩 호출 순서"
         )
         res_data = analyze_wrongs(payload)
+        self.assertEqual(mock_analyze.call_args.args[1], "오버라이딩 호출 순서")
         self.assertIn("items", res_data)
         self.assertEqual(len(res_data["items"]), 1)
         created_theory = res_data["items"][0]
@@ -50,10 +53,11 @@ class WrongAnalysisApiTests(unittest.TestCase):
         self.assertEqual(created_theory["source"], "ai_wrong_analysis")
         theory_id = created_theory["id"]
 
-        # Verify it shows up in theories()
+        # Verify it shows up in theories() with the detailed explanation
         theory_res = theories()
-        found = any(t["id"] == theory_id for t in theory_res["items"])
-        self.assertTrue(found)
+        saved = [t for t in theory_res["items"] if t["id"] == theory_id]
+        self.assertTrue(saved)
+        self.assertIn("자식 메서드", saved[0]["detailed_explanation"])
 
         # Delete it to clean up
         del_res = delete_theory(theory_id)

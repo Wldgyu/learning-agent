@@ -141,17 +141,91 @@ async function submitExam() {
     renderExamResults();
   } catch(error){button.disabled=false;button.textContent='20문제 제출';throw error}
 }
+function examResultStatus(r) {
+  if (r.is_correct === true) return { cls: 'green', label: '정답', key: 'correct' };
+  if (r.is_correct === false) return { cls: 'red', label: '오답', key: 'wrong' };
+  return { cls: 'gray', label: '직접 판정', key: 'pending' };
+}
 function renderExamResults() {
   const s=examState,results=s.results;
+  s.filter=s.filter||'all';
   const correct=results.filter(r=>r.is_correct===true).length;
+  const wrongCount=results.filter(r=>r.is_correct===false).length;
   const pending=results.filter(r=>r.is_correct===null).length;
-  view.innerHTML=`<div class="hero"><div><small>EXAM COMPLETE</small><h2>${s.year}년 ${s.round}회 결과</h2><p>정답 ${correct}/20 · 직접 판정 ${pending}문항${pending?' (판정 후 최종 점수 확인)':''}</p></div><button class="button light" data-view-go="exams">다른 회차 선택</button></div><div class="section-head"><h2>문항별 결과</h2></div><div class="list">${results.map(r=>`<div class="card exam-result"><div class="exam-result-head"><strong>${r.number}번</strong><span class="pill ${r.is_correct===true?'green':r.is_correct===false?'red':'gray'}">${r.is_correct===true?'정답':r.is_correct===false?'오답':'직접 판정'}</span></div><div class="note">내 답안: ${esc(r.user_answer||'(미작성)')}</div><div class="exam-answer-key">게시된 답안: ${esc(r.correct_answer)}</div>${r.is_correct===null?`<div class="actions"><button class="button ghost sm" data-exam-review="${r.attempt_id}:true">맞았어요</button><button class="button danger sm" data-exam-review="${r.attempt_id}:false">틀렸어요</button></div>`:''}</div>`).join('')}</div>`;
+  const score=Math.round(correct/results.length*100);
+  const filters=[['all','전체',results.length],['wrong','오답',wrongCount],['correct','정답',correct],['pending','직접 판정',pending]].filter(([key,,count])=>key==='all'||count);
+  if(!filters.some(([key])=>key===s.filter)) s.filter='all';
+  const shown=results.map((r,i)=>({r,i})).filter(({r})=>s.filter==='all'||examResultStatus(r).key===s.filter);
+  view.innerHTML=`<div class="hero exam-score-hero"><div><small>EXAM COMPLETE</small><h2>${s.year}년 ${s.round}회 결과</h2><p>정답 ${correct}/20 · 오답 ${wrongCount} · 직접 판정 ${pending}문항${pending?' (판정 후 최종 점수 확인)':''}</p></div><div class="score-ring" style="--score:${score}"><strong>${score}</strong><small>점</small></div></div>
+  <div class="section-head exam-results-head"><div><h2>문항별 결과</h2><p>문항을 클릭하면 문제 전체와 내 답·정답 비교, AI 해설을 볼 수 있습니다.</p></div>
+    <div class="actions">${wrongCount?`<button class="button" data-exam-weak>✦ 틀린 ${wrongCount}문제로 약점 이론 만들기</button>`:''}<button class="button ghost" data-view-go="exams">다른 회차 선택</button></div></div>
+  <div class="filter-pills">${filters.map(([key,label,count])=>`<button class="filter-pill ${s.filter===key?'active':''}" data-exam-filter="${key}">${label} <small>(${count})</small></button>`).join('')}</div>
+  <div class="list">${shown.map(({r,i})=>{const st=examResultStatus(r);return `<div class="card exam-result clickable ${st.key}" data-exam-detail="${i}" tabindex="0" role="button" aria-label="${r.number}번 결과 자세히 보기"><div class="exam-result-head"><strong>${r.number}번 <span class="exam-result-cat">${esc(s.items[i]?.category||'')} / ${esc(s.items[i]?.subcategory||'')}</span></strong><span class="pill ${st.cls}">${st.label}</span></div><div class="exam-result-preview">${esc((s.items[i]?.question_text||'').slice(0,110))}${(s.items[i]?.question_text||'').length>110?'…':''}</div><div class="answer-compare compact"><div class="answer-box mine ${st.key}"><small>내 답안</small><span>${esc(r.user_answer||'(미작성)')}</span></div><div class="answer-box key"><small>정답</small><span>${esc(r.correct_answer)}</span></div></div><div class="exam-result-foot">${r.is_correct===null?`<button class="button ghost sm" data-exam-review="${r.attempt_id}:true">맞았어요</button><button class="button danger sm" data-exam-review="${r.attempt_id}:false">틀렸어요</button>`:''}<span class="link-hint">${r.is_correct===false?'✦ 자세히 보기 · AI 오답 분석':'자세히 보기'} →</span></div></div>`}).join('') || '<div class="empty">해당하는 문항이 없습니다.</div>'}</div>`;
 }
 async function reviewExamAttempt(attemptId,correct) {
   await api(`/api/attempts/${attemptId}/review`,{method:'POST',body:JSON.stringify({is_correct:correct})});
   const result=examState.results.find(item=>item.attempt_id===attemptId);
   result.is_correct=correct;
   renderExamResults();
+}
+function renderAnalysisHtml(result, title='AI 오답 분석') {
+  const steps=Array.isArray(result.steps)?result.steps.map(step=>String(step).replace(/^\s*\d+[.)]\s*/,'')):[];
+  return `<div class="result ai-analysis"><strong class="ai-analysis-title">✦ ${esc(title)}</strong><p>${esc(result.feedback||'')}</p>${steps.length?`<strong>차근차근 풀이</strong><ol>${steps.map(step=>`<li>${esc(step)}</li>`).join('')}</ol>`:''}${result.cause?`<strong>내 답과 비교</strong><p>${esc(result.cause)}</p>`:''}${result.next_tip?`<strong>💡 다음에는 이렇게 확인하세요</strong><p>${esc(result.next_tip)}</p>`:''}${result.weak_concepts?.length?`<div class="note">복습할 개념: ${esc(result.weak_concepts.join(', '))}</div>`:''}</div>`;
+}
+const examAnalysisCache = new Map();
+async function openExamResultDetail(index) {
+  const s=examState; if(!s||!s.results) return;
+  const r=s.results[index], item=s.items[index];
+  const st=examResultStatus(r);
+  const modalBody=$('#modal-body');
+  const cached=examAnalysisCache.get(r.attempt_id);
+  modalBody.innerHTML=`
+    <div class="exam-detail-top"><span class="pill ${st.cls}">${st.label}</span><span class="pill">${esc(item.category)} / ${esc(item.subcategory)}</span></div>
+    <h2 class="question-title">${s.year}년 ${s.round}회 ${r.number}번</h2>
+    <div class="question-text">${esc(item.question_text)}</div>
+    ${(item.local_images||[]).map(url=>`<img class="question-image" src="${esc(url)}" alt="문제 첨부 이미지" loading="lazy">`).join('')}
+    <div class="answer-compare"><div class="answer-box mine ${st.key}"><small>내 답안</small><span>${esc(r.user_answer||'(미작성)')}</span></div><div class="answer-box key"><small>게시된 정답</small><span>${esc(r.correct_answer)}</span></div></div>
+    ${r.is_correct===null?`<div class="actions"><span class="note">자동 채점이 어려운 문항입니다. 직접 판정해 주세요.</span><button class="button ghost sm" data-detail-review="true">맞았어요</button><button class="button danger sm" data-detail-review="false">틀렸어요</button></div>`:''}
+    <div id="exam-detail-ai">${cached?renderAnalysisHtml(cached, r.is_correct?'AI 풀이 해설':'AI 오답 분석'):(r.is_correct===null?'':`<button class="button ${r.is_correct===false?'':'ghost'}" id="btn-exam-ai">✦ ${r.is_correct===false?'AI 오답 분석 받기':'AI 풀이 해설 보기'}</button>`)}</div>
+    <div class="exam-detail-nav">
+      <button class="button muted sm" id="exam-detail-prev" ${index===0?'disabled':''}>← 이전 문항</button>
+      <span>${index+1} / ${s.results.length}</span>
+      <button class="button muted sm" id="exam-detail-next" ${index===s.results.length-1?'disabled':''}>다음 문항 →</button>
+    </div>
+    <div class="actions"><button class="button ghost sm" id="btn-exam-retry">이 문제 다시 풀기</button><button class="button muted sm" data-close>닫기</button></div>`;
+  $('#modal').classList.remove('hidden');
+  $('#modal').setAttribute('aria-hidden','false');
+  $('.modal-card').scrollTop=0;
+  $('#exam-detail-prev').onclick=()=>openExamResultDetail(index-1);
+  $('#exam-detail-next').onclick=()=>openExamResultDetail(index+1);
+  $('#btn-exam-retry').onclick=()=>openQuestion('q',r.question_id).catch(fail);
+  modalBody.querySelectorAll('[data-detail-review]').forEach(btn=>btn.onclick=async()=>{
+    try{await reviewExamAttempt(r.attempt_id,btn.dataset.detailReview==='true');openExamResultDetail(index)}catch(e){fail(e)}
+  });
+  const aiBtn=$('#btn-exam-ai');
+  if(aiBtn) aiBtn.onclick=()=>runExamAnalysis(index);
+}
+async function runExamAnalysis(index) {
+  if(!aiEnabled){notice('.env에 API 키를 입력하세요.');return}
+  const r=examState.results[index];
+  const box=$('#exam-detail-ai');
+  box.innerHTML=aiProgress(r.is_correct?'AI가 풀이 과정을 정리하고 검수하고 있습니다…':'AI가 오답을 분석하고 풀이의 정확성을 검수하고 있습니다…');
+  try {
+    const result=await api(`/api/attempts/${r.attempt_id}/analyze`,{method:'POST'});
+    examAnalysisCache.set(r.attempt_id,result);
+    const current=$('#exam-detail-ai');
+    if(current===box) box.innerHTML=renderAnalysisHtml(result, r.is_correct?'AI 풀이 해설':'AI 오답 분석');
+  } catch(error) {
+    if($('#exam-detail-ai')!==box) return;
+    box.innerHTML=`<div class="result">${esc(error.message)} <button class="button ghost sm" id="retry-exam-ai">다시 시도</button></div>`;
+    $('#retry-exam-ai').onclick=()=>runExamAnalysis(index);
+  }
+}
+async function openExamWeakAnalysis() {
+  const wrongIds=new Set(examState.results.filter(r=>r.is_correct===false).map(r=>r.question_id));
+  const data=await api('/api/wrong-answers');
+  const items=(data.items||[]).filter(item=>wrongIds.has(item.question_id));
+  openWrongAnalysisModal(items, {title:`${examState.year}년 ${examState.round}회 틀린 문제 약점 분석`});
 }
 let wrongFilter = '전체';
 let theoryFilter = '전체';
@@ -168,6 +242,10 @@ function renderTheoryCardHtml(t, canDelete = true) {
     </div>
     <h3>${esc(t.title || t.subcategory)}</h3>
     <p class="theory-summary">${esc(t.summary || '')}</p>
+    ${t.detailed_explanation ? `<div class="theory-box explain-box">
+      <div class="theory-box-title">📘 이해하기 쉬운 상세 설명</div>
+      <div class="theory-box-content">${esc(t.detailed_explanation)}</div>
+    </div>` : ''}
     ${t.memorization_tip ? `<div class="theory-box memorization-box">
       <div class="theory-box-title">🌟 쉽게 외우는 암기 비법 & 꿀팁</div>
       <div class="theory-box-content">${esc(t.memorization_tip)}</div>
@@ -250,11 +328,12 @@ async function wrong() {
   }
 }
 
-function openWrongAnalysisModal(items) {
+function openWrongAnalysisModal(items, opts = {}) {
   if (!items || items.length === 0) {
     notice('분석할 오답 문제가 없습니다.');
     return;
   }
+  if (!aiEnabled) { notice('.env에 API 키를 입력하세요.'); return; }
   const groupMap = new Map();
   items.forEach(q => {
     const cat = q.category || '기타';
@@ -272,7 +351,7 @@ function openWrongAnalysisModal(items) {
     <div class="analysis-modal-content">
       <div class="modal-header-section">
         <div class="pill purple" style="margin-bottom:8px">✦ AI 오답 정복 가이드</div>
-        <h2 style="margin:0 0 8px">오답 유형별 AI 분석 & 암기자료 생성</h2>
+        <h2 style="margin:0 0 8px">${esc(opts.title || '오답 유형별 AI 분석 & 암기자료 생성')}</h2>
         <p class="note" style="margin:0">
           틀린 문제 유형을 선택하면, AI가 오답 원인을 분석하여 <strong>핵심 이론 요약</strong>과 <strong>쉽게 외울 수 있는 암기 비법</strong>을 제공합니다.<br>
           생성된 이론은 <strong>[이론 노트]</strong>에 자동 저장되어 언제든 다시 학습할 수 있습니다.
@@ -317,6 +396,12 @@ function openWrongAnalysisModal(items) {
             </div>
           </div>
         `).join('')}
+      </div>
+
+      <div class="focus-input-box">
+        <label for="analysis-focus"><strong>🎯 특히 이해하고 싶은 부분 (선택)</strong></label>
+        <textarea id="analysis-focus" maxlength="500" placeholder="예) LEFT JOIN과 INNER JOIN 차이가 헷갈려요 / 자바 상속에서 오버라이딩 호출 순서를 모르겠어요">${esc(opts.focus || '')}</textarea>
+        <small class="note">적어주면 AI가 그 부분을 중심으로 쉽게 풀어서 설명해 드려요.</small>
       </div>
 
       <div class="modal-footer-actions">
@@ -385,6 +470,7 @@ function openWrongAnalysisModal(items) {
     const selectedGroups = checkedBoxes.map(cb => groups[Number(cb.dataset.idx)]);
     const selectedTypes = selectedGroups.map(g => ({ category: g.category, subcategory: g.subcategory }));
     const selectedWrongIds = selectedGroups.flatMap(g => g.questions.map(q => q.id));
+    const focus = ($('#analysis-focus')?.value || '').trim();
 
     modalBody.innerHTML = `
       <div class="ai-loading-box">
@@ -399,7 +485,7 @@ function openWrongAnalysisModal(items) {
     try {
       const res = await api('/api/wrong-answers/analyze', {
         method: 'POST',
-        body: JSON.stringify({ types: selectedTypes, wrong_ids: selectedWrongIds })
+        body: JSON.stringify({ types: selectedTypes, wrong_ids: selectedWrongIds, focus })
       });
 
       modalBody.innerHTML = `
@@ -435,11 +521,12 @@ function openWrongAnalysisModal(items) {
             <p>${esc(err.message)}</p>
           </div>
           <div class="actions">
-            <button type="button" class="button" onclick="openWrongAnalysisModal(items)">다시 시도</button>
+            <button type="button" class="button" id="btn-retry-wrong-ai">다시 시도</button>
             <button type="button" class="button muted" data-close>닫기</button>
           </div>
         </div>
       `;
+      $('#btn-retry-wrong-ai').onclick = () => openWrongAnalysisModal(items, { ...opts, focus });
     }
   };
 }
@@ -728,6 +815,9 @@ document.addEventListener('click',event=>{
   if(event.target.closest('[data-exam-next]')&&examState){examState.index=Math.min(19,examState.index+1);renderExamQuestion();return}
   if(event.target.closest('[data-exam-submit]')){submitExam().catch(fail);return}
   const review=event.target.closest('[data-exam-review]'); if(review){const [id,correct]=review.dataset.examReview.split(':');reviewExamAttempt(Number(id),correct==='true').catch(fail);return}
+  const examFilter=event.target.closest('[data-exam-filter]'); if(examFilter&&examState){examState.filter=examFilter.dataset.examFilter;renderExamResults();return}
+  if(event.target.closest('[data-exam-weak]')&&examState){openExamWeakAnalysis().catch(fail);return}
+  const examDetail=event.target.closest('[data-exam-detail]'); if(examDetail&&examState){openExamResultDetail(Number(examDetail.dataset.examDetail)).catch(fail);return}
   const singleAiBtn = event.target.closest('[data-single-ai]');
   if (singleAiBtn) {
     event.stopPropagation();
@@ -752,7 +842,11 @@ document.addEventListener('click',event=>{
 document.addEventListener('input',event=>{
   if(event.target.id==='exam-answer'&&examState){examState.answers[examState.items[examState.index].id]=event.target.value;const count=examState.items.filter(item=>(examState.answers[item.id]||'').trim()).length;const footer=$('.exam-footer span');if(footer)footer.textContent=`${count}/20 답안 작성`}
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){closeModal();return}
+  const card=e.target.closest?.('[data-exam-detail]');
+  if(card&&examState&&(e.key==='Enter'||e.key===' ')&&e.target===card){e.preventDefault();openExamResultDetail(Number(card.dataset.examDetail)).catch(fail)}
+});
 $('#today-date').textContent=new Intl.DateTimeFormat('ko-KR',{dateStyle:'full'}).format(new Date());
 api('/api/status').then(s=>{aiEnabled=s.ai_enabled;$('#ai-status').textContent=aiEnabled?'API 키 설정됨':'API 키 입력 전';$('#ai-dot').classList.toggle('on',aiEnabled)}).catch(fail);
 setView('dashboard');
