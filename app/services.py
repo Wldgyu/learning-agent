@@ -86,7 +86,8 @@ def complete_attempt(db: sqlite3.Connection, attempt_id: int, correct: bool):
                    interval_index=excluded.interval_index,next_review_at=excluded.next_review_at,
                    last_result=excluded.last_result""",
                (attempt["user_id"], question_id, generated_id, interval_index, due.isoformat(), int(correct)))
-    if not correct:
+    # The wrong-answer notebook only collects mistakes made in the per-round exams (mode starts with exam:).
+    if not correct and str(attempt["mode"]).startswith("exam:"):
         db.execute(f"""INSERT INTO wrong_answer(user_id,question_id,generated_question_id,last_attempt_id,
                          user_answer,last_wrong_at,next_review_at) VALUES(?,?,?,?,?,?,?)
                          ON CONFLICT(user_id,{id_column}) DO UPDATE SET
@@ -117,14 +118,14 @@ def build_plan(db: sqlite3.Connection, user_id: int = 1, refresh: bool = False):
                             COALESCE(a.attempt_count,0) AS attempt_count
                             FROM question q JOIN question_meta m ON m.question_id=q.id
                             LEFT JOIN (SELECT question_id,COUNT(*) AS attempt_count FROM attempt
-                                       WHERE user_id=? GROUP BY question_id) a ON a.question_id=q.id""",
+                                       WHERE user_id=? AND mode='today' GROUP BY question_id) a ON a.question_id=q.id""",
                           (user_id,)).fetchall()
         source = [{**dict(row), "generated": False} for row in rows]
         reviews = [item for item in source if item["attempt_count"]]
         fresh = [item for item in source if not item["attempt_count"]]
         generated_reviews = db.execute("""SELECT g.id,g.category,g.subcategory FROM generated_question g
             WHERE g.user_id=? AND g.validation_status='valid' AND EXISTS
-            (SELECT 1 FROM attempt a WHERE a.user_id=? AND a.generated_question_id=g.id)""",
+            (SELECT 1 FROM attempt a WHERE a.user_id=? AND a.generated_question_id=g.id AND a.mode='today')""",
             (user_id, user_id)).fetchall()
         reviews += [{**dict(row), "generated": True} for row in generated_reviews]
 

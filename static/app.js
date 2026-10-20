@@ -14,10 +14,30 @@ const labels = {review:'복습',weak:'취약 분야',new:'새 문제',generated:
 
 function esc(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 async function api(path, options={}) {
-  const response = await fetch(path, {headers:{'Content-Type':'application/json'}, ...options});
-  const data = await response.json();
-  if (!response.ok) throw Error(typeof data.detail === 'string' ? data.detail : '요청을 처리하지 못했습니다.');
+  let response;
+  try {
+    response = await fetch(path, {headers:{'Content-Type':'application/json'}, ...options});
+  } catch (error) {
+    throw Error('서버에 연결하지 못했습니다. 서버가 실행 중인지 확인해 주세요.');
+  }
+  // The server can answer with non-JSON bodies (e.g. a plain-text "Internal Server Error"),
+  // so never call response.json() blindly.
+  const raw = await response.text();
+  let data = null;
+  if (raw) { try { data = JSON.parse(raw); } catch (error) { data = null; } }
+  if (!response.ok) throw Error(errorDetail(data, response.status));
+  if (data === null) throw Error('서버 응답을 해석하지 못했습니다. 잠시 후 다시 시도해 주세요.');
   return data;
+}
+function errorDetail(data, status) {
+  const detail = data && data.detail;
+  if (typeof detail === 'string' && detail) return detail;
+  if (Array.isArray(detail) && detail.length) {
+    // FastAPI validation errors (HTTP 422) are lists of {loc, msg}.
+    return '입력값이 올바르지 않습니다: ' + detail.map(item => (item && item.msg) || '').filter(Boolean).join(', ');
+  }
+  if (status >= 500) return `서버에서 오류가 발생했습니다 (HTTP ${status}). 잠시 후 다시 시도해 주세요.`;
+  return `요청을 처리하지 못했습니다 (HTTP ${status}).`;
 }
 function notice(message) { const n=$('#notice'); n.textContent=message; n.classList.add('show'); setTimeout(()=>n.classList.remove('show'),5000); }
 function fail(error) { notice(error.message || String(error)); }
@@ -275,7 +295,7 @@ async function wrong() {
     <div class="section-head">
       <div>
         <h2>오답노트 (${items.length}개)</h2>
-        <p>틀린 문제들을 복습하고, AI 분석으로 유형별 맞춤 이론과 쉬운 암기 비법을 받아보세요.</p>
+        <p>회차별 시험에서 틀린 문제만 기록됩니다. AI 분석으로 유형별 맞춤 이론과 쉬운 암기 비법을 받아보세요.</p>
       </div>
       <div class="actions">
         <button id="btn-open-wrong-ai" class="button" ${items.length ? '' : 'disabled'}>
@@ -380,7 +400,7 @@ function openWrongAnalysisModal(items, opts = {}) {
             </label>
             <div class="analysis-type-preview">
               <div class="preview-snippet">
-                대표 문제: ${esc(g.questions[0].question_text.slice(0, 85))}...
+                대표 문제: ${esc(String(g.questions[0].question_text || '').slice(0, 85))}...
               </div>
               <button type="button" class="link-button sm toggle-q-list" data-toggle-list="${idx}">
                 포함된 오답 문제 보기 (${g.questions.length}개) ▾
@@ -388,7 +408,7 @@ function openWrongAnalysisModal(items, opts = {}) {
               <div class="questions-accordion hidden" id="q-list-${idx}">
                 ${g.questions.map(q => `
                   <div class="mini-q-item">
-                    <div class="mini-q-title">▪ ${esc(q.question_text.slice(0, 110))}...</div>
+                    <div class="mini-q-title">▪ ${esc(String(q.question_text || '').slice(0, 110))}...</div>
                     ${q.wrong_reason ? `<div class="mini-q-reason">오답 원인: ${esc(q.wrong_reason)}</div>` : ''}
                   </div>
                 `).join('')}
@@ -534,7 +554,7 @@ function openWrongAnalysisModal(items, opts = {}) {
 async function review() {
   const data = await api(`/api/review-questions?page=${reviewPage}&size=20`);
   if (currentView !== 'review') return;
-  view.innerHTML = `<div class="section-head"><div><h2>복습 문제 ${data.total}개</h2><p>전에 풀었던 문제를 모았습니다. 문제를 열어 다시 풀 수 있습니다.</p></div></div><div class="list">${data.items.map(q => rowHtml({ ...q, reason: 'review' }, Boolean(q.generated))).join('') || '<div class="empty">아직 풀었던 문제가 없습니다.</div>'}</div><div id="review-pages" class="page-controls"></div>`;
+  view.innerHTML = `<div class="section-head"><div><h2>복습 문제 ${data.total}개</h2><p>오늘의 학습에서 푼 문제만 기록됩니다. 문제를 열어 다시 풀 수 있습니다.</p></div></div><div class="list">${data.items.map(q => rowHtml({ ...q, reason: 'review' }, Boolean(q.generated))).join('') || '<div class="empty">아직 오늘의 학습에서 푼 문제가 없습니다.</div>'}</div><div id="review-pages" class="page-controls"></div>`;
   $('#review-pages').innerHTML = `<button class="button muted sm" id="review-prev" ${reviewPage === 1 ? 'disabled' : ''}>이전</button><span>${reviewPage} / ${Math.max(1, Math.ceil(data.total / 20))}</span><button class="button muted sm" id="review-next" ${reviewPage * 20 >= data.total ? 'disabled' : ''}>다음</button>`;
   $('#review-prev').onclick = () => { reviewPage--; review().catch(fail); };
   $('#review-next').onclick = () => { reviewPage++; review().catch(fail); };

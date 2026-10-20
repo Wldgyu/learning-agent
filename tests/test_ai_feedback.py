@@ -27,11 +27,18 @@ class FeedbackTests(unittest.TestCase):
             self.assertEqual(llm_service.ask_json("역할", "자료"), good)
             self.assertEqual(request.call_count, 2)
 
-    def test_persistent_foreign_prose_is_not_displayed(self):
-        with patch.object(llm_service, "_request_json", return_value={"steps": ["その結果"]}) as request:
-            with self.assertRaisesRegex(RuntimeError, "한국어"):
-                llm_service.ask_json("역할", "자료")
-            self.assertEqual(request.call_count, 2)
+    def test_persistent_foreign_prose_is_translated_to_korean(self):
+        bad = {"feedback": "조건을 적용하고 その結果를 셉니다."}
+        good = {"feedback": "조건을 적용하고 그 결과를 셉니다."}
+        with patch.object(llm_service, "_request_json", side_effect=[bad, bad, good]) as request:
+            self.assertEqual(llm_service.ask_json("??", "??"), good)
+            self.assertEqual(request.call_count, 3)
+
+    def test_untranslatable_foreign_prose_is_stripped_not_displayed(self):
+        with patch.object(llm_service, "_request_json", return_value={"steps": ["결과는 その結果 입니다"]}):
+            result = llm_service.ask_json("??", "??")
+        self.assertFalse(llm_service.has_foreign_prose(result))
+        self.assertIn("결과는", result["steps"][0])
 
     def test_literal_code_and_answers_are_preserved(self):
         result = {"answer": "東京", "example": '```sql\nSELECT "東京";\n```\n문자열 `その結果`를 출력합니다.'}

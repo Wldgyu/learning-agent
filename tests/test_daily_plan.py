@@ -12,7 +12,8 @@ class DailyPlanTests(unittest.TestCase):
         self.db.executescript("""
             CREATE TABLE question(id INTEGER PRIMARY KEY,year INTEGER,round INTEGER,number INTEGER,question_text TEXT);
             CREATE TABLE question_meta(question_id INTEGER,category TEXT,subcategory TEXT);
-            CREATE TABLE attempt(id INTEGER PRIMARY KEY,user_id INTEGER,question_id INTEGER,generated_question_id INTEGER);
+            CREATE TABLE attempt(id INTEGER PRIMARY KEY,user_id INTEGER,question_id INTEGER,generated_question_id INTEGER,
+                mode TEXT);
             CREATE TABLE generated_question(id INTEGER PRIMARY KEY,user_id INTEGER,question_text TEXT,
                 category TEXT,subcategory TEXT,validation_status TEXT);
             CREATE TABLE daily_plan(user_id INTEGER,plan_date TEXT,position INTEGER,question_id INTEGER,
@@ -22,9 +23,11 @@ class DailyPlanTests(unittest.TestCase):
             self.db.execute("INSERT INTO question VALUES(?,?,?,?,?)", (number, 2025, 1, number, f"기출 {number}"))
             self.db.execute("INSERT INTO question_meta VALUES(?,?,?)", (number, "프로그래밍", "Java"))
         for number in range(1, 9):
-            self.db.execute("INSERT INTO attempt(user_id,question_id) VALUES(1,?)", (number,))
+            self.db.execute("INSERT INTO attempt(user_id,question_id,mode) VALUES(1,?,'today')", (number,))
+        # Solved only in a per-round exam: must not become a review question.
+        self.db.execute("INSERT INTO attempt(user_id,question_id,mode) VALUES(1,9,'exam:2025-1')")
         self.db.execute("INSERT INTO generated_question VALUES(1,1,'AI 문제','보안','기본','valid')")
-        self.db.execute("INSERT INTO attempt(user_id,generated_question_id) VALUES(1,1)")
+        self.db.execute("INSERT INTO attempt(user_id,generated_question_id,mode) VALUES(1,1,'today')")
 
     def tearDown(self):
         self.db.close()

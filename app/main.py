@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -17,11 +18,20 @@ from .question_context import verified_image_text
 
 
 ROOT = Path(__file__).resolve().parent.parent
+logger = logging.getLogger(__name__)
 initialize()
 app = FastAPI(title="AI 학습 Agent", version="0.1.0")
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 app.mount("/assets", StaticFiles(directory=ROOT / "source_cache" / "images", check_dir=False), name="assets")
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, exc: Exception):
+    """Always answer API calls with JSON so the browser never sees a plain-text 500."""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse({"detail": "서버에서 예상하지 못한 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."},
+                        status_code=500)
 
 
 @app.middleware("http")
@@ -291,6 +301,8 @@ def analyze_attempt(attempt_id: int):
             question = require_question(db, attempt["question_id"])
         else:
             question = db.execute("SELECT * FROM generated_question WHERE id=?", (attempt["generated_question_id"],)).fetchone()
+            if question is None:
+                raise HTTPException(404, "생성 문제를 찾을 수 없습니다.")
         if not llm_service.available():
             raise HTTPException(503, ".env에 API 키를 입력하세요.")
         image_context = verified_image_text(db, question) if attempt["question_id"] else ""
@@ -509,13 +521,13 @@ def review_questions(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=
                     m.category,m.subcategory,0 AS generated,COUNT(*) AS attempt_count,
                     MAX(a.created_at) AS last_attempt_at
                     FROM attempt a JOIN question q ON q.id=a.question_id
-                    JOIN question_meta m ON m.question_id=q.id WHERE a.user_id=1
+                    JOIN question_meta m ON m.question_id=q.id WHERE a.user_id=1 AND a.mode='today'
                     GROUP BY q.id"""
         generated = """SELECT g.id,NULL AS year,NULL AS round,NULL AS number,
                        substr(g.question_text,1,150) AS preview,g.category,g.subcategory,
                        1 AS generated,COUNT(*) AS attempt_count,MAX(a.created_at) AS last_attempt_at
                        FROM attempt a JOIN generated_question g ON g.id=a.generated_question_id
-                       WHERE a.user_id=1 AND g.user_id=1 AND g.validation_status='valid'
+                       WHERE a.user_id=1 AND a.mode='today' AND g.user_id=1 AND g.validation_status='valid'
                        GROUP BY g.id"""
         combined = f"({source} UNION ALL {generated})"
         total = db.execute(f"SELECT COUNT(*) FROM {combined}").fetchone()[0]
